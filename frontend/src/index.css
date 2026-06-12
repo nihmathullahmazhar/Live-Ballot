@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background-color: #FAF6EC;
+  /* faint ballot-paper guilloche: hairline grid */
+  background-image:
+    linear-gradient(#00000008 1px, transparent 1px),
+    linear-gradient(90deg, #00000008 1px, transparent 1px);
+  background-size: 26px 26px;
+  color: #16161D;
+  font-family: 'Public Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  /* Double-rule frame — the official-document signature device */
+  .rule-frame {
+    border: 2px solid theme('colors.rule');
+    box-shadow: inset 0 0 0 4px theme('colors.paper'), inset 0 0 0 6px theme('colors.rule');
+  }
+  .rule-top {
+    border-top: 2px solid theme('colors.rule');
+    box-shadow: 0 3px 0 -1px theme('colors.rule');
+  }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 0.7rem;
+    color: theme('colors.faint');
+  }
+
+  .btn {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 2px solid theme('colors.rule');
+    padding: 0.65rem 1.1rem;
+    background: theme('colors.paper');
+    transition: transform .04s ease, box-shadow .12s ease, background .12s ease;
+    box-shadow: 3px 3px 0 0 theme('colors.rule');
+  }
+  .btn:hover { background: #fff; }
+  .btn:active { transform: translate(3px,3px); box-shadow: 0 0 0 0 theme('colors.rule'); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+  .btn-primary { background: theme('colors.violet'); color: #fff; }
+  .btn-primary:hover { background: #5a39a0; }
+  .btn-danger { background: theme('colors.ballot'); color: #fff; }
+  .btn-danger:hover { background: #de2440; }
+
+  .input {
+    width: 100%;
+    font-family: 'Public Sans', sans-serif;
+    border: 2px solid theme('colors.rule');
+    background: #fff;
+    padding: 0.6rem 0.7rem;
+    outline: none;
+  }
+  .input:focus { box-shadow: 0 0 0 3px theme('colors.violet'); }
+
+  .panel {
+    background: theme('colors.paper');
+    border: 2px solid theme('colors.rule');
+    box-shadow: theme('boxShadow.paper');
+  }
+
+  .stamp {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border: 3px double currentColor;
+    padding: 0.15rem 0.6rem;
+    transform: rotate(-4deg);
+    display: inline-block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
