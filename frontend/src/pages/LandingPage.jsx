@@ -4,7 +4,7 @@ import Layout from '../components/Layout'
 import InkX from '../components/InkX'
 import { Eyebrow } from '../components/ui'
 import { supabase, isConfigured } from '../lib/supabase'
-import { LogIn, ArrowRight, UserPlus, FileText, KeyRound, BarChart3, ShieldCheck } from 'lucide-react'
+import { ArrowRight, UserPlus, LogIn } from 'lucide-react'
 
 export default function LandingPage() {
   const nav = useNavigate()
@@ -30,34 +30,54 @@ export default function LandingPage() {
         </div>
       )}
 
-      {/* HERO */}
+      {/* One unified hero: pitch + both actions + ballot visual */}
       <div className="panel overflow-hidden">
-        <div className="grid lg:grid-cols-[1.1fr_0.9fr]">
-          {/* left */}
+        <div className="grid lg:grid-cols-[1.05fr_0.95fr]">
+          {/* left: headline + actions */}
           <div className="p-6 sm:p-10">
             <Eyebrow>Form&nbsp;LB&nbsp;·&nbsp;Official&nbsp;ballot&nbsp;system</Eyebrow>
             <h1 className="font-display font-900 text-5xl sm:text-6xl leading-[0.9] uppercase mt-3">
               Run clean<br />elections,<br /><span className="text-violet">end to end.</span>
             </h1>
-            <p className="mt-5 text-ink/80 max-w-md text-lg">
-              Build a registration form, verify who's in, issue one-time codes, and watch the
-              count come in live — all from one organiser dashboard.
+            <p className="mt-4 text-ink/80 max-w-md">
+              Build a form, verify who's in, issue one-time codes, and watch the count come in live —
+              all from one dashboard.
             </p>
-            <div className="mt-6 flex flex-wrap gap-3">
+
+            {/* organiser action */}
+            <div className="mt-6">
               {loggedIn ? (
-                <button className="btn btn-primary text-lg" onClick={() => nav('/dashboard')}>
+                <button className="btn btn-primary text-lg w-full sm:w-auto" onClick={() => nav('/dashboard')}>
                   Open your dashboard <ArrowRight size={18} className="inline -mt-1 ml-1" />
                 </button>
               ) : (
-                <button className="btn btn-primary text-lg" onClick={() => nav('/auth')}>
-                  <UserPlus size={18} className="inline -mt-1 mr-1" /> Create an account
+                <button className="btn btn-primary text-lg w-full sm:w-auto" onClick={() => nav('/auth')}>
+                  <UserPlus size={18} className="inline -mt-1 mr-1" /> Create an account / Log in
                 </button>
               )}
-              <a href="#vote" className="btn text-lg">I have a code</a>
+              <p className="text-xs text-faint mt-2">For organisers — set up and run your elections.</p>
             </div>
+
+            {/* divider */}
+            <div className="flex items-center gap-3 my-5">
+              <span className="h-[2px] flex-1 bg-rule/30" />
+              <span className="eyebrow text-[0.65rem]">have a code?</span>
+              <span className="h-[2px] flex-1 bg-rule/30" />
+            </div>
+
+            {/* voter action — now right here in the hero */}
+            <form onSubmit={enter} className="flex gap-2">
+              <input className="input font-mono tracking-[0.3em] uppercase text-center"
+                placeholder="AB12CD" value={code} maxLength={6}
+                onChange={(e) => setCode(e.target.value)} aria-label="Election code" />
+              <button className="btn whitespace-nowrap" type="submit">
+                <LogIn size={16} className="inline -mt-1 mr-1" /> Vote
+              </button>
+            </form>
+            <p className="text-xs text-faint mt-2">For voters — enter the code from your organiser to register or vote.</p>
           </div>
 
-          {/* right — mock ballot paper */}
+          {/* right: ballot visual */}
           <div className="bg-paper2 border-t-2 lg:border-t-0 lg:border-l-2 border-rule p-6 sm:p-10 flex items-center justify-center">
             <div className="w-full max-w-xs bg-white border-2 border-rule shadow-paper p-5 rotate-[-1.5deg]">
               <div className="flex items-center justify-between border-b-2 border-rule pb-2">
@@ -83,63 +103,10 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* FEATURES */}
-      <section className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-6">
-        {[
-          [FileText, 'Custom forms', 'Build your own registration + nomination form, no extra links.'],
-          [ShieldCheck, 'Verify voters', 'Admission ranges or one-time codes, with optional photo check.'],
-          [KeyRound, 'Issue codes', 'Approve registrants and hand out single-use voting codes.'],
-          [BarChart3, 'Live count', 'Watch turnout and results update as votes land.'],
-        ].map(([Icon, t, d]) => (
-          <div key={t} className="panel p-5">
-            <span className="text-violet"><Icon size={22} /></span>
-            <h3 className="font-display font-800 uppercase text-sm mt-3">{t}</h3>
-            <p className="text-ink/70 text-sm mt-1">{d}</p>
-          </div>
-        ))}
-      </section>
-
-      {/* TWO PATHS */}
-      <section id="vote" className="grid md:grid-cols-2 gap-6 mt-6">
-        <div className="panel p-6 sm:p-8 flex flex-col">
-          <Eyebrow>For organisers</Eyebrow>
-          {loggedIn ? (
-            <>
-              <h2 className="font-display font-800 text-2xl uppercase mt-2">Welcome back</h2>
-              <p className="text-ink/75 text-sm mt-2">Your elections are on your dashboard.</p>
-              <button className="btn btn-primary mt-4" onClick={() => nav('/dashboard')}>
-                Open your dashboard <ArrowRight size={16} className="inline -mt-1 ml-1" />
-              </button>
-            </>
-          ) : (
-            <>
-              <h2 className="font-display font-800 text-2xl uppercase mt-2">Create an account</h2>
-              <p className="text-ink/75 text-sm mt-2">
-                Sign up with your email and a password, then create and run elections from your
-                dashboard — log back in from any device.
-              </p>
-              <button className="btn btn-primary mt-4" onClick={() => nav('/auth')}>
-                <UserPlus size={16} className="inline -mt-1 mr-1" /> Create account / Log in
-              </button>
-            </>
-          )}
-        </div>
-
-        <div className="panel p-6 sm:p-8 flex flex-col">
-          <Eyebrow>For voters</Eyebrow>
-          <h2 className="font-display font-800 text-2xl uppercase mt-2">Enter an election</h2>
-          <p className="text-ink/75 text-sm mt-2">Got a code from your organiser? Type it in to register or vote.</p>
-          <form onSubmit={enter} className="mt-4 flex gap-2">
-            <input className="input font-mono tracking-[0.25em] uppercase"
-              placeholder="AB12CD" value={code} maxLength={6}
-              onChange={(e) => setCode(e.target.value)} />
-            <button className="btn whitespace-nowrap" type="submit">
-              <LogIn size={16} className="inline -mt-1 mr-1" /> Go
-            </button>
-          </form>
-          <p className="text-xs text-faint mt-4">Your vote is private. Codes work once and can't be reused.</p>
-        </div>
-      </section>
+      {/* slim one-line capability strip — no boxes */}
+      <p className="mt-5 text-center eyebrow text-[0.65rem] text-faint">
+        Custom forms · Verified voters · One-time codes · Live count · Export to CSV
+      </p>
     </Layout>
   )
 }
