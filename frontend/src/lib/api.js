@@ -19,6 +19,12 @@ export const getElectionPublic = (code) =>
 export const getTurnout = (code) =>
   rpc('get_turnout', { p_code: code })
 
+export const getMyElections = () =>
+  rpc('get_my_elections', {})
+
+export const getMyElection = (code) =>
+  rpc('get_my_election', { p_code: code })
+
 export const registerVoter = (args) =>
   rpc('register_voter', args)
 
@@ -39,6 +45,9 @@ export const getResults = (code) =>
 
 export const adminLogin = (code, password) =>
   rpc('admin_login', { p_code: code, p_password: password })
+
+export const adminSetPassword = (code, password, newPassword) =>
+  rpc('admin_set_password', { p_code: code, p_password: password, p_new_password: newPassword })
 
 export const adminGetVoters = (code, password) =>
   rpc('admin_get_voters', { p_code: code, p_password: password })
@@ -83,6 +92,78 @@ export const adminGetIntake = (code, password) =>
 
 export const adminGetCandidates = (code, password) =>
   rpc('admin_get_candidates', { p_code: code, p_password: password })
+
+/* ------------------- FORM BUILDER + TIMELINE (STEP 3.5) ------------------- */
+
+export const getFormFields = (code) =>
+  rpc('get_form_fields', { p_code: code })
+
+export const adminSetFormFields = (code, password, fields) =>
+  rpc('admin_set_form_fields', { p_code: code, p_password: password, p_fields: fields })
+
+export const submitFormResponse = (code, answers, wantsCandidacy, candidacy) =>
+  rpc('submit_form_response', {
+    p_code: code, p_answers: answers,
+    p_wants_candidacy: wantsCandidacy, p_candidacy: candidacy,
+  })
+
+export const adminGetResponses = (code, password) =>
+  rpc('admin_get_responses', { p_code: code, p_password: password })
+
+export const adminUpdateResponse = (code, password, id, answers, wantsCandidacy, candidacy) =>
+  rpc('admin_update_response', {
+    p_code: code, p_password: password, p_id: id,
+    p_answers: answers, p_wants_candidacy: wantsCandidacy, p_candidacy: candidacy,
+  })
+
+export const adminDeleteResponse = (code, password, id) =>
+  rpc('admin_delete_response', { p_code: code, p_password: password, p_id: id })
+
+export const adminGenerateCodes = (code, password, ids) =>
+  rpc('admin_generate_codes', { p_code: code, p_password: password, p_ids: ids })
+
+export const adminFinalizeElection = (code, password) =>
+  rpc('admin_finalize_election', { p_code: code, p_password: password })
+
+export const adminUnfinalizeElection = (code, password) =>
+  rpc('admin_unfinalize_election', { p_code: code, p_password: password })
+
+export const adminSetResultsMode = (code, password, mode) =>
+  rpc('admin_set_results_mode', { p_code: code, p_password: password, p_mode: mode })
+
+export const adminSetPaused = (code, password, paused) =>
+  rpc('admin_set_paused', { p_code: code, p_password: password, p_paused: paused })
+
+export const adminSetRegistrationOpen = (code, password, open) =>
+  rpc('admin_set_registration_open', { p_code: code, p_password: password, p_open: open })
+
+export const adminSetSelfNomination = (code, password, enable) =>
+  rpc('admin_set_self_nomination', { p_code: code, p_password: password, p_enable: enable })
+
+export const adminSetVoteMessage = (code, password, message) =>
+  rpc('admin_set_vote_message', { p_code: code, p_password: password, p_message: message })
+
+export const adminGetActivity = (code, password) =>
+  rpc('admin_get_activity', { p_code: code, p_password: password })
+
+// ---- ballot setup: positions & candidates, any time after creation ----
+export const adminGetBallot = (code, password) =>
+  rpc('admin_get_ballot', { p_code: code, p_password: password })
+
+export const adminAddPosition = (code, password, title, maxWinners) =>
+  rpc('admin_add_position', { p_code: code, p_password: password, p_title: title, p_max_winners: maxWinners })
+
+export const adminUpdatePosition = (code, password, positionId, title, maxWinners) =>
+  rpc('admin_update_position', { p_code: code, p_password: password, p_position_id: positionId, p_title: title, p_max_winners: maxWinners })
+
+export const adminDeletePosition = (code, password, positionId) =>
+  rpc('admin_delete_position', { p_code: code, p_password: password, p_position_id: positionId })
+
+export const adminAddCandidate = (code, password, positionId, name, bio) =>
+  rpc('admin_add_candidate', { p_code: code, p_password: password, p_position_id: positionId, p_name: name, p_bio: bio })
+
+export const adminDeleteCandidate = (code, password, candidateId) =>
+  rpc('admin_delete_candidate', { p_code: code, p_password: password, p_candidate_id: candidateId })
 
 export const adminConvertIntake = (code, password, intakeId) =>
   rpc('admin_convert_intake', {

@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Rule, Spinner, Eyebrow } from '../../components/ui'
 import { adminGetTally } from '../../lib/api'
-import { RefreshCw } from 'lucide-react'
+import { downloadCSV } from '../../lib/csv'
+import { RefreshCw, Download } from 'lucide-react'
 
 export default function TallyTab({ code, password, settings }) {
   const [data, setData] = useState(null)
@@ -28,12 +29,25 @@ export default function TallyTab({ code, password, settings }) {
           <RefreshCw size={14} className="inline -mt-1 mr-1" /> Refresh
         </button>
       </div>
+      <div className="-mt-2">
+        <button className="btn text-sm" onClick={() => {
+          const rows = []
+          ;(data.positions || []).forEach((p) => (p.candidates || []).forEach((c) =>
+            rows.push({ position: p.title, candidate: c.name, provisional: c.provisional, verified: c.verified })))
+          downloadCSV(`${code}-results`, rows,
+            [{ key: 'position', label: 'Position' }, { key: 'candidate', label: 'Candidate' },
+             { key: 'provisional', label: 'Provisional' }, { key: 'verified', label: 'Verified (counted)' }])
+        }}>
+          <Download size={14} className="inline -mt-1 mr-1" /> Export results CSV
+        </button>
+      </div>
 
       {(data.positions || []).map((p) => (
         <div key={p.id} className="panel p-6">
           <h3 className="font-display font-800 text-xl uppercase">{p.title}</h3>
           <Rule />
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[20rem]">
             <thead>
               <tr className="text-left eyebrow">
                 <th className="pb-2">Candidate</th>
@@ -51,6 +65,7 @@ export default function TallyTab({ code, password, settings }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ))}
 

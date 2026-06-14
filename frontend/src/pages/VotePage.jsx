@@ -52,9 +52,9 @@ export default function VotePage() {
     finally { setBusy(false) }
   }
 
-  if (loading) return <Layout code={code}><div className="panel p-8"><Spinner label="Loading ballot…" /></div></Layout>
+  if (loading) return <Layout code={code} back><div className="panel p-8"><Spinner label="Loading ballot…" /></div></Layout>
   if (error) return (
-    <Layout code={code}>
+    <Layout code={code} back>
       <div className="panel p-8 text-center">
         <p className="text-ballot font-display font-700 text-xl uppercase">{error}</p>
         <Link to="/" className="btn mt-5 inline-block">Back to start</Link>
@@ -63,11 +63,16 @@ export default function VotePage() {
   )
 
   if (done) return (
-    <Layout code={code}>
+    <Layout code={code} back>
       <div className="panel p-10 text-center max-w-xl mx-auto">
         <div className="text-verify flex justify-center"><InkX size={64} /></div>
         <h1 className="font-display font-900 text-3xl uppercase mt-3">Ballot cast</h1>
         <p className="text-ink/70 mt-2">Your mark has been counted{isCode ? ' and your code is now used' : ''}.</p>
+        {election.vote_message && (
+          <div className="mt-5 panel bg-paper2 p-4 text-ink/90 whitespace-pre-wrap text-left">
+            {election.vote_message}
+          </div>
+        )}
         <div className="mt-6 flex justify-center gap-3">
           <Link to={`/e/${code}/results`} className="btn">See results page</Link>
           <Link to="/" className="btn btn-primary">Done</Link>
@@ -77,7 +82,7 @@ export default function VotePage() {
   )
 
   return (
-    <Layout code={code}>
+    <Layout code={code} back>
       {/* Masthead */}
       <div className="panel p-6">
         <Eyebrow>Official ballot · {election.code}</Eyebrow>
@@ -85,15 +90,10 @@ export default function VotePage() {
         {election.description && <p className="text-ink/75 mt-2">{election.description}</p>}
         <div className="mt-3 flex flex-wrap gap-2 items-center text-sm">
           <PhaseBadge phase={phase} />
-          {election.verified_mode && (
-            <>
-              <Link to={`/e/${code}/register`} className="underline underline-offset-4 hover:text-violet">Register to vote</Link>
-              <span className="text-faint">·</span>
-              <Link to={`/e/${code}/nominate`} className="underline underline-offset-4 hover:text-violet">Self-nominate</Link>
-            </>
-          )}
           <span className="text-faint">·</span>
-          <Link to={`/e/${code}/request`} className="underline underline-offset-4 hover:text-violet">Request access</Link>
+          <Link to={`/e/${code}/form`} className="underline underline-offset-4 hover:text-violet">
+            {election.enable_self_nomination ? 'Register / stand as candidate' : 'Register'}
+          </Link>
         </div>
       </div>
 
@@ -101,10 +101,13 @@ export default function VotePage() {
         <div className="panel p-5 mt-5 border-violet">
           <p className="font-display font-700 uppercase">
             {phase === 'closed' ? 'Voting is closed.'
+              : phase === 'paused' ? 'Voting is paused by the organisers.'
               : phase === 'nominations' ? 'Nominations are open — voting hasn’t started.'
               : phase === 'pre_voting' ? 'Nominations closed. Voting opens soon.'
+              : phase === 'finalizing' ? 'Registration is open — voting hasn’t started yet.'
               : 'Voting hasn’t opened yet.'}
           </p>
+          <Link to={`/e/${code}/form`} className="btn mt-3 inline-block mr-2">Register</Link>
           {election.results_published && (
             <Link to={`/e/${code}/results`} className="btn mt-3 inline-block">View published results</Link>
           )}
@@ -176,6 +179,7 @@ function PhaseBadge({ phase }) {
     nominations: ['pending', 'Nominations'],
     pre_voting: ['pending', 'Opening soon'],
     closed: ['sealed', 'Closed'],
+    paused: ['rejected', 'Paused'],
     scheduled: ['pending', 'Scheduled'],
   }
   const [kind, label] = map[phase] || ['pending', phase || '—']

@@ -18,9 +18,9 @@ export default function ResultsPage() {
     })()
   }, [code])
 
-  if (loading) return <Layout code={code}><div className="panel p-8"><Spinner label="Loading results…" /></div></Layout>
+  if (loading) return <Layout code={code} back><div className="panel p-8"><Spinner label="Loading results…" /></div></Layout>
   if (error) return (
-    <Layout code={code}>
+    <Layout code={code} back>
       <div className="panel p-8 text-center">
         <p className="font-display font-700 uppercase text-violet text-xl">Results aren’t available</p>
         <p className="text-faint mt-2 font-mono text-sm">{error}</p>
@@ -30,7 +30,7 @@ export default function ResultsPage() {
   )
 
   return (
-    <Layout code={code}>
+    <Layout code={code} back>
       <div className="panel p-6">
         <Eyebrow>Certified results</Eyebrow>
         <h1 className="font-display font-900 text-4xl uppercase mt-2">{data.title}</h1>
