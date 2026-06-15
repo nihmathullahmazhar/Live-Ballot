@@ -39,7 +39,10 @@ export default function FormBuilderTab({ code, password, settings, onSettingsCha
     setLoading(true)
     try {
       const f = await getFormFields(code)
-      setFields((f?.fields || []).map(({ id, ...rest }) => rest))
+      setFields((f?.fields || []).map(({ id, ...rest }) => ({
+        ...rest,
+        options: Array.isArray(rest.options) ? rest.options.join(', ') : (rest.options || ''),
+      })))
     } catch (e) { toast(e.message, 'error') }
     finally { setLoading(false) }
   }, [code, toast])
@@ -52,7 +55,7 @@ export default function FormBuilderTab({ code, password, settings, onSettingsCha
     const c = [...fs]; [c[i], c[j]] = [c[j], c[i]]; return c
   })
   const add = (section) => setFields((fs) => [...fs, {
-    section, field_key: `field_${fs.length + 1}`, label: '', field_type: 'text', required: false, options: [],
+    section, field_key: `field_${fs.length + 1}`, label: '', field_type: 'text', required: false, options: '',
   }])
 
   async function save() {
@@ -195,7 +198,7 @@ function Section({ title, hint, items, TYPES, update, move, remove }) {
                     <span className="eyebrow">Options (comma-separated)</span>
                     <input className="input"
                       value={Array.isArray(f.options) ? f.options.join(', ') : f.options}
-                      onChange={(e) => update(i, 'options', e.target.value.split(',').map((x) => x.trim()).filter(Boolean))} />
+                      onChange={(e) => update(i, 'options', e.target.value)} />
                   </label>
                 )}
               </div>

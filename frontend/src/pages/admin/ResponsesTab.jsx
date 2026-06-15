@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Eyebrow, Rule, Spinner } from '../../components/ui'
 import { useToast } from '../../components/Toast'
 import {
-  adminGetResponses, adminDeleteResponse, adminGenerateCodes, adminUpdateResponse,
+  adminGetResponses, adminDeleteResponse, adminGenerateCodes, adminUpdateResponse, getFormFields,
 } from '../../lib/api'
 import { Trash2, KeyRound, Search, Download, MessageCircle, Mail, Check, X } from 'lucide-react'
 import { downloadCSV } from '../../lib/csv'
@@ -17,10 +17,19 @@ export default function ResponsesTab({ code, password }) {
   const [issued, setIssued] = useState([])       // results of last generate
   const [busy, setBusy] = useState(false)
   const [edit, setEdit] = useState(null)         // response being edited
+  const [fields, setFields] = useState([])       // form field definitions (labels/types)
+  const [view, setView] = useState('individual') // 'individual' | 'summary'
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setRows(await adminGetResponses(code, password)) }
+    try {
+      const [resp, ff] = await Promise.all([
+        adminGetResponses(code, password),
+        getFormFields(code).catch(() => null),
+      ])
+      setRows(resp)
+      setFields((ff?.fields || []).filter((f) => f.section === 'voter'))
+    }
     catch (e) { toast(e.message, 'error') }
     finally { setLoading(false) }
   }, [code, password, toast])
@@ -100,6 +109,15 @@ export default function ResponsesTab({ code, password }) {
         </div>
       </div>
 
+      {/* view toggle — like Google Forms */}
+      <div className="flex gap-2 items-center">
+        {[['individual', 'Individual'], ['summary', 'Summary']].map(([v, l]) => (
+          <button key={v} onClick={() => setView(v)}
+            className={`btn text-sm ${view === v ? 'btn-primary' : ''}`}>{l}</button>
+        ))}
+        <span className="ml-auto eyebrow">{list.length} of {rows.length} responses</span>
+      </div>
+
       {/* Issued panel + distribution */}
       {issued.length > 0 && (
         <div className="panel p-5 border-verify">
@@ -133,38 +151,53 @@ export default function ResponsesTab({ code, password }) {
         </div>
       )}
 
-      <p className="eyebrow">{list.length} of {rows.length} shown</p>
+      {/* SUMMARY view — per-question breakdown, like Google Forms */}
+      {view === 'summary' && (
+        <Summary rows={list} fields={fields} />
+      )}
 
-      {/* Responses list */}
+      {/* INDIVIDUAL view — each response with all answers */}
+      {view === 'individual' && (
       <div className="panel divide-y-2 divide-rule/30">
         {list.length === 0 && <div className="p-6 text-faint text-sm">No responses.</div>}
         {list.map((r) => (
-          <div key={r.id} className="p-4 flex flex-wrap items-center gap-3 justify-between">
-            <div className="flex items-start gap-3 min-w-0">
-              {r.status === 'pending' && (
-                <input type="checkbox" className="mt-1" checked={!!sel[r.id]}
-                  onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} />
-              )}
-              <div className="min-w-0">
-                <div className="font-display font-700">
-                  {r.name || 'Unnamed'}
-                  {r.wants_candidacy && <span className="ml-2 text-xs font-mono text-violet">candidate</span>}
-                  {r.dup_email && <span className="ml-2 text-xs font-mono text-ballot">⚑ dup email</span>}
-                  {r.dup_admission && <span className="ml-2 text-xs font-mono text-ballot">⚑ dup ID</span>}
-                  <span className={`ml-2 text-xs font-mono ${r.status === 'converted' ? 'text-verify' : 'text-faint'}`}>· {r.status}</span>
-                </div>
-                <div className="text-sm text-faint font-mono truncate">
-                  {r.email}{r.admission_number ? ` · #${r.admission_number}` : ''}
+          <div key={r.id} className="p-4">
+            <div className="flex flex-wrap items-start gap-3 justify-between">
+              <div className="flex items-start gap-3 min-w-0">
+                {r.status === 'pending' && (
+                  <input type="checkbox" className="mt-1" checked={!!sel[r.id]}
+                    onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} />
+                )}
+                <div className="min-w-0">
+                  <div className="font-display font-700">
+                    {r.name || 'Unnamed'}
+                    {r.wants_candidacy && <span className="ml-2 text-xs font-mono text-violet">candidate</span>}
+                    {r.dup_email && <span className="ml-2 text-xs font-mono text-ballot">⚑ dup email</span>}
+                    {r.dup_admission && <span className="ml-2 text-xs font-mono text-ballot">⚑ dup ID</span>}
+                    <span className={`ml-2 text-xs font-mono ${r.status === 'converted' ? 'text-verify' : 'text-faint'}`}>· {r.status}</span>
+                  </div>
+                  {r.created_at && <div className="text-xs text-faint font-mono">{new Date(r.created_at).toLocaleString()}</div>}
                 </div>
               </div>
+              <div className="flex gap-2">
+                <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>View / edit</button>
+                <button className="btn btn-danger px-3" onClick={() => del(r.id)}><Trash2 size={15} /></button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>View / edit</button>
-              <button className="btn btn-danger px-3" onClick={() => del(r.id)}><Trash2 size={15} /></button>
-            </div>
+
+            {/* answers, labeled like a form submission */}
+            <dl className="mt-3 grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              {answerRows(r, fields).map(({ label, value }, k) => (
+                <div key={k} className="flex gap-2 border-b border-dashed border-rule/40 py-1">
+                  <dt className="text-faint min-w-[8rem] shrink-0">{label}</dt>
+                  <dd className="font-600 break-words">{value || <span className="text-faint font-normal">—</span>}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
         ))}
       </div>
+      )}
 
       {edit && (
         <EditModal r={edit} code={code} password={password} toast={toast}
@@ -225,4 +258,95 @@ function download(name, content) {
   const blob = new Blob([content], { type: 'text/csv' })
   const url = URL.createObjectURL(blob); const a = document.createElement('a')
   a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
+}
+
+// ---- helpers: read an answer + build labeled rows + summary aggregation ----
+function valOf(r, key) {
+  let v = r.answers?.[key]
+  if (v === undefined || v === null || v === '') {
+    if (key === 'name') v = r.name
+    else if (key === 'email') v = r.email
+    else if (key === 'admission_number') v = r.admission_number
+  }
+  if (Array.isArray(v)) return v.join(', ')
+  return v == null ? '' : String(v)
+}
+
+function answerRows(r, fields) {
+  if (fields && fields.length) {
+    return fields.map((f) => ({ label: f.label || f.field_key, value: valOf(r, f.field_key) }))
+  }
+  const out = []
+  if (r.name) out.push({ label: 'Name', value: r.name })
+  if (r.email) out.push({ label: 'Email', value: r.email })
+  if (r.admission_number) out.push({ label: 'Admission number', value: String(r.admission_number) })
+  Object.entries(r.answers || {}).forEach(([k, v]) =>
+    out.push({ label: k, value: Array.isArray(v) ? v.join(', ') : String(v ?? '') }))
+  return out
+}
+
+function Summary({ rows, fields }) {
+  if (!fields || fields.length === 0)
+    return <div className="panel p-6 text-faint text-sm">Build your form (Form tab) to see a question-by-question summary here.</div>
+  const total = rows.length
+  return (
+    <div className="space-y-4">
+      <div className="panel p-4">
+        <span className="font-display font-900 text-2xl">{total}</span>
+        <span className="text-faint ml-2">response{total === 1 ? '' : 's'}</span>
+      </div>
+      {fields.map((f) => {
+        const isChoice = ['dropdown', 'radio', 'checkbox'].includes(f.field_type)
+        const answered = rows.filter((r) => valOf(r, f.field_key) !== '')
+        return (
+          <div key={f.field_key} className="panel p-4">
+            <div className="font-display font-700">{f.label || f.field_key}</div>
+            <div className="text-xs text-faint font-mono mb-2">{f.field_type} · {answered.length}/{total} answered</div>
+            {isChoice ? (
+              <ChoiceBars rows={rows} field={f} options={Array.isArray(f.options) ? f.options : []} />
+            ) : (
+              <ul className="text-sm space-y-0.5 max-h-52 overflow-auto">
+                {answered.length === 0 && <li className="text-faint">No answers yet.</li>}
+                {answered.slice(0, 100).map((r, i) => (
+                  <li key={i} className="border-b border-dashed border-rule/40 py-0.5 break-words">{valOf(r, f.field_key)}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChoiceBars({ rows, field, options }) {
+  const counts = {}
+  options.forEach((o) => { counts[o] = 0 })
+  let blank = 0
+  rows.forEach((r) => {
+    const raw = r.answers?.[field.field_key]
+    if (field.field_type === 'checkbox') {
+      const arr = Array.isArray(raw) ? raw : (raw ? [raw] : [])
+      if (arr.length === 0) blank++
+      arr.forEach((x) => { counts[x] = (counts[x] || 0) + 1 })
+    } else {
+      if (raw === undefined || raw === null || raw === '') blank++
+      else counts[raw] = (counts[raw] || 0) + 1
+    }
+  })
+  const max = Math.max(1, ...Object.values(counts), blank)
+  return (
+    <div className="space-y-1">
+      {Object.entries(counts).map(([opt, c]) => (
+        <div key={opt} className="flex items-center gap-2 text-sm">
+          <span className="min-w-[7rem] sm:min-w-[10rem] shrink-0 truncate">{opt}</span>
+          <span className="flex-1 bg-paper2 h-4 border border-rule/30">
+            <span className="block h-full bg-violet" style={{ width: `${(c / max) * 100}%` }} />
+          </span>
+          <span className="font-mono text-xs w-8 text-right">{c}</span>
+        </div>
+      ))}
+      {blank > 0 && <div className="text-xs text-faint mt-1">No answer: {blank}</div>}
+    </div>
+  )
 }

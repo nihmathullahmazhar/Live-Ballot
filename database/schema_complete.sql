@@ -34,6 +34,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 DROP TABLE IF EXISTS votes              CASCADE;
 DROP TABLE IF EXISTS candidates         CASCADE;
 DROP TABLE IF EXISTS registrations      CASCADE;
+DROP TABLE IF EXISTS form_fields        CASCADE;
 DROP TABLE IF EXISTS intake_responses   CASCADE;
 DROP TABLE IF EXISTS positions          CASCADE;
 DROP TABLE IF EXISTS audit_log          CASCADE;
@@ -57,6 +58,12 @@ BEGIN
         'admin_regenerate_code','admin_approve_registration','admin_reject_registration',
         'admin_approve_candidate','admin_reject_candidate','admin_get_tally',
         'admin_get_candidates',
+        'get_my_elections','get_my_election','get_form_fields','admin_set_form_fields','submit_form_response',
+        'admin_get_responses','admin_update_response','admin_delete_response',
+        'admin_generate_codes','admin_finalize_election','admin_unfinalize_election',
+        'admin_set_results_mode','admin_set_paused','admin_set_registration_open','admin_set_self_nomination','admin_set_password','admin_set_vote_message','admin_get_activity',
+        'admin_get_ballot','admin_add_position','admin_update_position','admin_delete_position',
+        'admin_add_candidate','admin_delete_candidate',
         'admin_get_intake','admin_convert_intake','admin_reject_intake',
         'admin_publish_results','admin_unpublish_results','admin_reset_votes',
         'admin_set_vote_counted','admin_purge_photos','admin_delete_election',
@@ -77,7 +84,7 @@ CREATE TABLE elections (
   code                  text NOT NULL UNIQUE,                 -- 6-char public slug
   title                 text NOT NULL,
   description           text,
-  admin_password_hash   text NOT NULL,                        -- bcrypt, never returned
+  admin_password_hash   text,                                 -- bcrypt; NULL = no sharing password (owner-only)
 
   -- voter identity method (Feature 1)
   voter_identity_method text NOT NULL DEFAULT 'admission_number'
@@ -103,6 +110,22 @@ CREATE TABLE elections (
 
   -- email (Feature 3): email required at registration; optional auto-email of codes
   auto_email_codes      boolean NOT NULL DEFAULT false,
+
+  -- candidate self-nomination (STEP 3.5) — independent of verified_mode
+  enable_self_nomination boolean NOT NULL DEFAULT false,
+
+  -- results visibility model (3 modes): hidden until released, live during, admin only
+  results_mode          text NOT NULL DEFAULT 'hidden'
+                          CHECK (results_mode IN ('hidden','live','admin_only')),
+
+  -- finalization gate: voting cannot open until the admin finalizes
+  is_finalized          boolean NOT NULL DEFAULT false,
+  finalized_at          timestamptz,
+
+  -- live operational switches the admin flips during the run
+  is_paused             boolean NOT NULL DEFAULT false,   -- temporarily halt voting
+  registration_open     boolean NOT NULL DEFAULT true,    -- accept new form submissions?
+  vote_message          text,                             -- custom message shown after a voter casts their vote
 
   -- time windows
   nominations_open_at   timestamptz,
@@ -137,6 +160,7 @@ CREATE TABLE registrations (
   grade             text,
   batch             text,
   admission_number  text,
+  raw_data          jsonb NOT NULL DEFAULT '{}'::jsonb,  -- custom form answers
   voter_code        text,                       -- the unique one-time code
   code_issued       boolean NOT NULL DEFAULT false,
   selfie_path       text,                        -- path in private bucket, not a URL
@@ -205,13 +229,35 @@ CREATE TABLE intake_responses (
   grade             text,
   batch             text,
   admission_number  text,
-  raw_data          jsonb NOT NULL DEFAULT '{}'::jsonb,  -- flexible extra fields
+  raw_data          jsonb NOT NULL DEFAULT '{}'::jsonb,  -- dynamic form answers keyed by field_key
+  wants_candidacy   boolean NOT NULL DEFAULT false,
+  candidacy         jsonb NOT NULL DEFAULT '{}'::jsonb,   -- {position_ids:[], statement, experience, photo_path}
   status            text NOT NULL DEFAULT 'pending'
                       CHECK (status IN ('pending','converted','rejected')),
   registration_id   uuid REFERENCES registrations(id) ON DELETE SET NULL,
   created_at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_intake_election ON intake_responses(election_id, status);
+
+-- 2.6b form_fields — the admin-built custom registration form (dynamic, like a
+--      Google Form). section 'voter' = always shown; 'candidate' = shown only
+--      when the person opts into self-nomination.
+CREATE TABLE form_fields (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  election_id  uuid NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
+  section      text NOT NULL DEFAULT 'voter' CHECK (section IN ('voter','candidate')),
+  field_key    text NOT NULL,                     -- stable key used in answers jsonb
+  label        text NOT NULL,
+  field_type   text NOT NULL CHECK (field_type IN
+                 ('text','textarea','email','phone','number','nic',
+                  'dropdown','radio','checkbox','document')),
+  required     boolean NOT NULL DEFAULT false,
+  options      jsonb NOT NULL DEFAULT '[]'::jsonb,  -- choices for dropdown/radio/checkbox
+  sort_order   integer NOT NULL DEFAULT 0,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_field_key UNIQUE (election_id, section, field_key)
+);
+CREATE INDEX idx_form_fields_election ON form_fields(election_id, section, sort_order);
 
 -- 2.7 audit_log — append-only trail of every meaningful action
 CREATE TABLE audit_log (
@@ -235,6 +281,7 @@ ALTER TABLE registrations    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidates       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votes            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE intake_responses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_fields      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log        ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE elections        FORCE ROW LEVEL SECURITY;
@@ -243,6 +290,7 @@ ALTER TABLE registrations    FORCE ROW LEVEL SECURITY;
 ALTER TABLE candidates       FORCE ROW LEVEL SECURITY;
 ALTER TABLE votes            FORCE ROW LEVEL SECURITY;
 ALTER TABLE intake_responses FORCE ROW LEVEL SECURITY;
+ALTER TABLE form_fields      FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_log        FORCE ROW LEVEL SECURITY;
 
 -- ============================================================================
@@ -251,6 +299,19 @@ ALTER TABLE audit_log        FORCE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION lb_now() RETURNS timestamptz
 LANGUAGE sql STABLE AS $$ SELECT now() $$;
+
+-- 4.0 current authenticated user id from the Supabase JWT (NULL if logged out).
+--     Reads request claims directly so it also loads cleanly on plain Postgres.
+CREATE OR REPLACE FUNCTION _lb_current_uid() RETURNS uuid
+LANGUAGE sql STABLE
+AS $$
+  SELECT NULLIF(
+    COALESCE(
+      current_setting('request.jwt.claim.sub', true),
+      NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'
+    ), ''
+  )::uuid
+$$;
 
 -- 4.1 generate a code in the election's chosen format
 CREATE OR REPLACE FUNCTION _lb_gen_code(p_format text, p_length integer)
@@ -287,13 +348,24 @@ SECURITY DEFINER
 SET search_path = public, extensions
 AS $$
 DECLARE
-  v_id   uuid;
-  v_hash text;
+  v_id    uuid;
+  v_owner uuid;
+  v_hash  text;
+  v_uid   uuid;
 BEGIN
-  SELECT id, admin_password_hash INTO v_id, v_hash
+  SELECT id, owner_id, admin_password_hash INTO v_id, v_owner, v_hash
   FROM elections WHERE code = upper(p_code);
   IF v_id IS NULL THEN RETURN NULL; END IF;
-  IF v_hash = crypt(p_password, v_hash) THEN RETURN v_id; END IF;
+  -- 1) the logged-in owner gets full access via their account (no election password)
+  v_uid := _lb_current_uid();
+  IF v_uid IS NOT NULL AND v_owner IS NOT NULL AND v_uid = v_owner THEN
+    RETURN v_id;
+  END IF;
+  -- 2) otherwise an (optional) sharing password is required
+  IF v_hash IS NOT NULL AND p_password IS NOT NULL
+     AND v_hash = crypt(p_password, v_hash) THEN
+    RETURN v_id;
+  END IF;
   RETURN NULL;
 END $$;
 
@@ -315,11 +387,19 @@ LANGUAGE sql STABLE
 AS $$
   SELECT CASE
     WHEN e.voting_close_at  IS NOT NULL AND now() > e.voting_close_at        THEN 'closed'
-    WHEN e.voting_open_at   IS NOT NULL AND now() >= e.voting_open_at        THEN 'voting'
+    WHEN e.is_paused AND e.is_finalized                                      THEN 'paused'
+    WHEN NOT e.is_finalized
+         AND ((e.voting_open_at IS NULL) OR now() >= COALESCE(e.nominations_close_at, e.voting_open_at))
+         AND (e.nominations_open_at IS NOT NULL OR e.voting_open_at IS NOT NULL
+              OR e.verified_mode OR e.enable_self_nomination)                THEN 'finalizing'
+    WHEN e.voting_open_at   IS NOT NULL AND now() >= e.voting_open_at
+         AND e.is_finalized                                                  THEN 'voting'
     WHEN e.nominations_close_at IS NOT NULL AND now() > e.nominations_close_at
          AND (e.voting_open_at IS NULL OR now() < e.voting_open_at)          THEN 'pre_voting'
     WHEN e.nominations_open_at  IS NOT NULL AND now() >= e.nominations_open_at THEN 'nominations'
-    WHEN e.nominations_open_at  IS NULL AND e.voting_open_at IS NULL         THEN 'open'
+    WHEN e.nominations_open_at  IS NULL AND e.voting_open_at IS NULL
+         AND e.is_finalized                                                  THEN 'open'
+    WHEN e.nominations_open_at  IS NULL AND e.voting_open_at IS NULL         THEN 'finalizing'
     ELSE 'scheduled'
   END;
 $$;
@@ -342,11 +422,14 @@ CREATE OR REPLACE FUNCTION create_election(
   p_verified_mode         boolean DEFAULT false,
   p_admin_can_see_votes   boolean DEFAULT false,
   p_auto_email_codes      boolean DEFAULT false,
+  p_enable_self_nomination boolean DEFAULT false,
+  p_results_mode          text    DEFAULT 'hidden',
   p_nominations_open_at   timestamptz DEFAULT NULL,
   p_nominations_close_at  timestamptz DEFAULT NULL,
   p_voting_open_at        timestamptz DEFAULT NULL,
   p_voting_close_at       timestamptz DEFAULT NULL,
-  p_positions             jsonb   DEFAULT '[]'::jsonb  -- [{title, max_winners, candidates:[{name,bio}]}]
+  p_positions             jsonb   DEFAULT '[]'::jsonb,  -- [{title, max_winners, candidates:[{name,bio}]}]
+  p_form_fields           jsonb   DEFAULT '[]'::jsonb   -- [{section,field_key,label,field_type,required,options,sort_order}]
 )
 RETURNS TABLE(election_id uuid, code text)
 LANGUAGE plpgsql
@@ -361,8 +444,10 @@ DECLARE
   v_pos_id uuid;
   v_tries int := 0;
 BEGIN
-  IF length(coalesce(p_admin_password,'')) < 4 THEN
-    RAISE EXCEPTION 'Admin password must be at least 4 characters';
+  -- password is optional now (owner accesses via their account). If one IS
+  -- given, it must be at least 4 chars — it becomes the sharing key.
+  IF COALESCE(btrim(p_admin_password),'') <> '' AND length(btrim(p_admin_password)) < 4 THEN
+    RAISE EXCEPTION 'If you set a password it must be at least 4 characters';
   END IF;
 
   -- unique 6-char code (uppercase, unambiguous alphabet)
@@ -378,14 +463,33 @@ BEGIN
     voter_identity_method, admission_min, admission_max,
     code_format, code_length, code_issue_timing,
     verified_mode, admin_can_see_votes, auto_email_codes,
-    nominations_open_at, nominations_close_at, voting_open_at, voting_close_at
+    enable_self_nomination, results_mode,
+    nominations_open_at, nominations_close_at, voting_open_at, voting_close_at,
+    owner_id
   ) VALUES (
-    v_code, p_title, p_description, crypt(p_admin_password, gen_salt('bf')),
+    v_code, p_title, p_description,
+    CASE WHEN COALESCE(btrim(p_admin_password),'') = '' THEN NULL
+         ELSE crypt(p_admin_password, gen_salt('bf')) END,
     p_voter_identity_method, p_admission_min, p_admission_max,
     p_code_format, p_code_length, p_code_issue_timing,
     p_verified_mode, p_admin_can_see_votes, p_auto_email_codes,
-    p_nominations_open_at, p_nominations_close_at, p_voting_open_at, p_voting_close_at
+    p_enable_self_nomination, COALESCE(p_results_mode,'hidden'),
+    p_nominations_open_at, p_nominations_close_at, p_voting_open_at, p_voting_close_at,
+    _lb_current_uid()
   ) RETURNING id INTO v_id;
+
+  -- optional custom form fields
+  INSERT INTO form_fields(election_id, section, field_key, label, field_type, required, options, sort_order)
+  SELECT v_id,
+         COALESCE(f->>'section','voter'),
+         f->>'field_key',
+         f->>'label',
+         f->>'field_type',
+         COALESCE((f->>'required')::boolean,false),
+         COALESCE(f->'options','[]'::jsonb),
+         COALESCE((f->>'sort_order')::int,0)
+  FROM jsonb_array_elements(COALESCE(p_form_fields,'[]'::jsonb)) f
+  WHERE f->>'field_key' IS NOT NULL AND f->>'label' IS NOT NULL;
 
   -- optional positions + candidates payload
   FOR v_pos IN SELECT * FROM jsonb_array_elements(coalesce(p_positions,'[]'::jsonb)) LOOP
@@ -424,6 +528,12 @@ BEGIN
     'description', e.description,
     'voter_identity_method', e.voter_identity_method,
     'verified_mode', e.verified_mode,
+    'enable_self_nomination', e.enable_self_nomination,
+    'results_mode', e.results_mode,
+    'is_finalized', e.is_finalized,
+    'is_paused', e.is_paused,
+    'registration_open', e.registration_open,
+    'vote_message', e.vote_message,
     'phase', _lb_election_phase(e),
     'results_published', e.results_published,
     'nominations_open_at', e.nominations_open_at,
@@ -609,6 +719,10 @@ BEGIN
 
   v_phase := _lb_election_phase(e);
   IF v_phase = 'closed' THEN RAISE EXCEPTION 'Voting is closed'; END IF;
+  IF e.is_paused THEN RAISE EXCEPTION 'Voting is paused by the organisers'; END IF;
+  IF NOT e.is_finalized THEN
+    RAISE EXCEPTION 'Voting has not opened yet — the election is still being finalized';
+  END IF;
   IF e.voting_open_at IS NOT NULL AND now() < e.voting_open_at THEN
     RAISE EXCEPTION 'Voting has not opened yet';
   END IF;
@@ -676,7 +790,13 @@ DECLARE e elections;
 BEGIN
   SELECT * INTO e FROM elections WHERE code = upper(p_code);
   IF e.id IS NULL THEN RAISE EXCEPTION 'Election not found'; END IF;
-  IF NOT e.results_published THEN RAISE EXCEPTION 'Results are not published yet'; END IF;
+  -- results visibility model:
+  --   admin_only -> never public; live -> always public; hidden -> only once published
+  IF e.results_mode = 'admin_only' THEN
+    RAISE EXCEPTION 'Results are not public for this election';
+  ELSIF e.results_mode = 'hidden' AND NOT e.results_published THEN
+    RAISE EXCEPTION 'Results are not published yet';
+  END IF;
 
   RETURN jsonb_build_object(
     'title', e.title,
@@ -721,6 +841,13 @@ BEGIN
     'code_issue_timing', e.code_issue_timing,
     'verified_mode', e.verified_mode, 'admin_can_see_votes', e.admin_can_see_votes,
     'auto_email_codes', e.auto_email_codes, 'results_published', e.results_published,
+    'enable_self_nomination', e.enable_self_nomination, 'results_mode', e.results_mode,
+    'is_finalized', e.is_finalized,
+    'is_paused', e.is_paused, 'registration_open', e.registration_open,
+    'has_password', (e.admin_password_hash IS NOT NULL),
+    'vote_message', e.vote_message,
+    'nominations_open_at', e.nominations_open_at, 'nominations_close_at', e.nominations_close_at,
+    'voting_open_at', e.voting_open_at, 'voting_close_at', e.voting_close_at,
     'phase', _lb_election_phase(e)
   );
 END $$;
@@ -1217,6 +1344,498 @@ BEGIN
 END $$;
 
 -- ============================================================================
+-- 6b. FORM BUILDER + RESPONSE MANAGEMENT + FINALIZATION (STEP 3.5 + timeline)
+-- ============================================================================
+
+-- 6b.0 the logged-in organiser's own elections (cross-device dashboard)
+CREATE OR REPLACE FUNCTION get_my_elections()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE v_uid uuid;
+BEGIN
+  v_uid := _lb_current_uid();
+  IF v_uid IS NULL THEN RETURN '[]'::jsonb; END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'code', e.code, 'title', e.title, 'phase', _lb_election_phase(e),
+      'is_finalized', e.is_finalized, 'is_paused', e.is_paused,
+      'turnout', (SELECT count(*) FROM registrations r WHERE r.election_id = e.id AND r.has_voted),
+      'created_at', e.created_at)
+    ORDER BY e.created_at DESC)
+    FROM elections e WHERE e.owner_id = v_uid), '[]'::jsonb);
+END $$;
+
+-- 6b.0b owner-only rich detail for one of my elections (no per-election password)
+CREATE OR REPLACE FUNCTION get_my_election(p_code text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_uid uuid; e elections;
+BEGIN
+  v_uid := _lb_current_uid();
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Not signed in'; END IF;
+  SELECT * INTO e FROM elections WHERE code = upper(p_code) AND owner_id = v_uid;
+  IF e.id IS NULL THEN RAISE EXCEPTION 'Election not found'; END IF;
+  RETURN jsonb_build_object(
+    'code', e.code, 'title', e.title, 'description', e.description,
+    'phase', _lb_election_phase(e), 'is_finalized', e.is_finalized, 'is_paused', e.is_paused,
+    'registration_open', e.registration_open, 'results_mode', e.results_mode,
+    'results_published', e.results_published, 'enable_self_nomination', e.enable_self_nomination,
+    'has_password', (e.admin_password_hash IS NOT NULL),
+    'voter_identity_method', e.voter_identity_method,
+    'created_at', e.created_at, 'finalized_at', e.finalized_at,
+    'voting_open_at', e.voting_open_at, 'voting_close_at', e.voting_close_at,
+    'nominations_open_at', e.nominations_open_at, 'nominations_close_at', e.nominations_close_at,
+    'registered', (SELECT count(*) FROM registrations r WHERE r.election_id = e.id),
+    'voted',      (SELECT count(*) FROM registrations r WHERE r.election_id = e.id AND r.has_voted),
+    'responses',  (SELECT count(*) FROM intake_responses i WHERE i.election_id = e.id),
+    'positions', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'title', p.title, 'max_winners', p.max_winners,
+        'candidates', COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'name', c.name,
+            'votes', (SELECT count(*) FROM votes v WHERE v.candidate_id = c.id AND v.is_counted))
+            ORDER BY (SELECT count(*) FROM votes v WHERE v.candidate_id = c.id AND v.is_counted) DESC, c.name)
+          FROM candidates c WHERE c.position_id = p.id AND c.status = 'approved'), '[]'::jsonb))
+        ORDER BY p.sort_order, p.title)
+      FROM positions p WHERE p.election_id = e.id), '[]'::jsonb)
+  );
+END $$;
+
+-- 6b.1 public: get the custom form definition (voter + candidate sections)
+CREATE OR REPLACE FUNCTION get_form_fields(p_code text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE e elections;
+BEGIN
+  SELECT * INTO e FROM elections WHERE code = upper(p_code);
+  IF e.id IS NULL THEN RETURN NULL; END IF;
+  RETURN jsonb_build_object(
+    'enable_self_nomination', e.enable_self_nomination,
+    'fields', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'id', f.id, 'section', f.section, 'field_key', f.field_key,
+        'label', f.label, 'field_type', f.field_type,
+        'required', f.required, 'options', f.options, 'sort_order', f.sort_order)
+        ORDER BY f.section, f.sort_order, f.label)
+      FROM form_fields f WHERE f.election_id = e.id), '[]'::jsonb)
+  );
+END $$;
+-- 6b.2 admin: replace the whole form definition in one call
+CREATE OR REPLACE FUNCTION admin_set_form_fields(p_code text, p_password text, p_fields jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid; v_n int;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  DELETE FROM form_fields WHERE election_id = v_id;
+  INSERT INTO form_fields(election_id, section, field_key, label, field_type, required, options, sort_order)
+  SELECT v_id,
+         COALESCE(f->>'section','voter'),
+         f->>'field_key', f->>'label', f->>'field_type',
+         COALESCE((f->>'required')::boolean,false),
+         COALESCE(f->'options','[]'::jsonb),
+         COALESCE((f->>'sort_order')::int, (row_number() OVER ())::int)
+  FROM jsonb_array_elements(COALESCE(p_fields,'[]'::jsonb)) f
+  WHERE f->>'field_key' IS NOT NULL AND f->>'label' IS NOT NULL;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  PERFORM _lb_audit(v_id, 'form_fields_set', 'admin', jsonb_build_object('count', v_n));
+  RETURN jsonb_build_object('ok', true, 'count', v_n);
+END $$;
+
+-- 6b.3 public: submit a filled form (+ optional self-nomination)
+CREATE OR REPLACE FUNCTION submit_form_response(
+  p_code text, p_answers jsonb,
+  p_wants_candidacy boolean DEFAULT false, p_candidacy jsonb DEFAULT '{}'::jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE e elections; v_rid uuid;
+BEGIN
+  SELECT * INTO e FROM elections WHERE code = upper(p_code);
+  IF e.id IS NULL THEN RAISE EXCEPTION 'Election not found'; END IF;
+  IF e.is_finalized OR NOT e.registration_open THEN
+    RAISE EXCEPTION 'Registration is closed for this election';
+  END IF;
+
+  INSERT INTO intake_responses(election_id, name, email, grade, batch, admission_number,
+                               raw_data, wants_candidacy, candidacy)
+  VALUES (e.id,
+          COALESCE(p_answers->>'name', p_answers->>'full_name'),
+          p_answers->>'email',
+          p_answers->>'grade',
+          p_answers->>'batch',
+          COALESCE(p_answers->>'admission_number', p_answers->>'student_id'),
+          COALESCE(p_answers,'{}'::jsonb),
+          COALESCE(p_wants_candidacy,false) AND e.enable_self_nomination,
+          COALESCE(p_candidacy,'{}'::jsonb))
+  RETURNING id INTO v_rid;
+
+  PERFORM _lb_audit(e.id, 'form_submitted', 'voter', jsonb_build_object('response_id', v_rid));
+  RETURN jsonb_build_object('ok', true, 'response_id', v_rid);
+END $$;
+
+-- 6b.4 admin: list responses (+ duplicate flags on email/admission)
+CREATE OR REPLACE FUNCTION admin_get_responses(p_code text, p_password text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', r.id, 'name', r.name, 'email', r.email, 'grade', r.grade,
+      'batch', r.batch, 'admission_number', r.admission_number,
+      'answers', r.raw_data, 'wants_candidacy', r.wants_candidacy,
+      'candidacy', r.candidacy, 'status', r.status,
+      'registration_id', r.registration_id, 'created_at', r.created_at,
+      'dup_email', (r.email IS NOT NULL AND (SELECT count(*) FROM intake_responses x
+                     WHERE x.election_id = v_id AND x.email = r.email) > 1),
+      'dup_admission', (r.admission_number IS NOT NULL AND (SELECT count(*) FROM intake_responses x
+                     WHERE x.election_id = v_id AND x.admission_number = r.admission_number) > 1))
+      ORDER BY r.created_at DESC)
+    FROM intake_responses r WHERE r.election_id = v_id), '[]'::jsonb);
+END $$;
+
+-- 6b.5 admin: edit a response's details before generating a code
+CREATE OR REPLACE FUNCTION admin_update_response(
+  p_code text, p_password text, p_id uuid,
+  p_answers jsonb DEFAULT NULL, p_wants_candidacy boolean DEFAULT NULL, p_candidacy jsonb DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE intake_responses SET
+    raw_data = COALESCE(p_answers, raw_data),
+    name = COALESCE(p_answers->>'name', p_answers->>'full_name', name),
+    email = COALESCE(p_answers->>'email', email),
+    grade = COALESCE(p_answers->>'grade', grade),
+    batch = COALESCE(p_answers->>'batch', batch),
+    admission_number = COALESCE(p_answers->>'admission_number', p_answers->>'student_id', admission_number),
+    wants_candidacy = COALESCE(p_wants_candidacy, wants_candidacy),
+    candidacy = COALESCE(p_candidacy, candidacy)
+  WHERE id = p_id AND election_id = v_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Response not found'; END IF;
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+-- 6b.6 admin: delete a response
+CREATE OR REPLACE FUNCTION admin_delete_response(p_code text, p_password text, p_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  DELETE FROM intake_responses WHERE id = p_id AND election_id = v_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Response not found'; END IF;
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+-- 6b.7 admin: approve responses in bulk -> create registrations + issue codes,
+--      and (if they opted in) create PENDING candidate rows per chosen position.
+CREATE OR REPLACE FUNCTION admin_generate_codes(p_code text, p_password text, p_ids uuid[])
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE
+  v_id uuid; e elections; r intake_responses%ROWTYPE;
+  v_new text; v_tries int; v_reg uuid; v_pos jsonb; v_out jsonb := '[]'::jsonb;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  SELECT * INTO e FROM elections WHERE id = v_id;
+
+  FOR r IN SELECT * FROM intake_responses
+           WHERE election_id = v_id AND id = ANY(p_ids) AND status = 'pending' LOOP
+    -- allocate a unique code for this election
+    v_tries := 0;
+    LOOP
+      v_new := _lb_gen_code(e.code_format, e.code_length);
+      EXIT WHEN NOT EXISTS (SELECT 1 FROM registrations
+                            WHERE election_id = v_id AND voter_code = v_new);
+      v_tries := v_tries + 1;
+      IF v_tries > 50 THEN RAISE EXCEPTION 'Could not allocate code'; END IF;
+    END LOOP;
+
+    INSERT INTO registrations(election_id, name, email, grade, batch, admission_number,
+                              raw_data, voter_code, code_issued, status)
+    VALUES (v_id, r.name, r.email, r.grade, r.batch, r.admission_number,
+            r.raw_data, v_new, true, 'approved')
+    RETURNING id INTO v_reg;
+
+    UPDATE intake_responses SET status='converted', registration_id=v_reg WHERE id = r.id;
+
+    -- self-nomination: one pending candidate row per chosen position
+    IF r.wants_candidacy THEN
+      FOR v_pos IN SELECT * FROM jsonb_array_elements(COALESCE(r.candidacy->'position_ids','[]'::jsonb)) LOOP
+        INSERT INTO candidates(election_id, position_id, name, photo_path, bio, manifesto,
+                               source, status, registration_id)
+        SELECT v_id, (v_pos #>> '{}')::uuid, r.name,
+               r.candidacy->>'photo_path', r.candidacy->>'experience',
+               r.candidacy->>'statement', 'self_nominated', 'pending', v_reg
+        WHERE EXISTS (SELECT 1 FROM positions WHERE id = (v_pos #>> '{}')::uuid AND election_id = v_id);
+      END LOOP;
+    END IF;
+
+    v_out := v_out || jsonb_build_object('response_id', r.id, 'registration_id', v_reg,
+                        'name', r.name, 'email', r.email, 'voter_code', v_new);
+  END LOOP;
+
+  PERFORM _lb_audit(v_id, 'codes_generated', 'admin',
+            jsonb_build_object('count', jsonb_array_length(v_out)));
+  RETURN jsonb_build_object('ok', true, 'issued', v_out);
+END $$;
+
+-- 6b.8 admin: finalize / unfinalize (the gate that lets voting open)
+CREATE OR REPLACE FUNCTION admin_finalize_election(p_code text, p_password text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE elections SET is_finalized = true, finalized_at = now() WHERE id = v_id;
+  PERFORM _lb_audit(v_id, 'election_finalized', 'admin', '{}'::jsonb);
+  RETURN jsonb_build_object('ok', true, 'is_finalized', true);
+END $$;
+
+CREATE OR REPLACE FUNCTION admin_unfinalize_election(p_code text, p_password text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE elections SET is_finalized = false, finalized_at = NULL WHERE id = v_id;
+  PERFORM _lb_audit(v_id, 'election_unfinalized', 'admin', '{}'::jsonb);
+  RETURN jsonb_build_object('ok', true, 'is_finalized', false);
+END $$;
+
+-- 6b.9 admin: set results visibility mode
+CREATE OR REPLACE FUNCTION admin_set_results_mode(p_code text, p_password text, p_mode text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  IF p_mode NOT IN ('hidden','live','admin_only') THEN RAISE EXCEPTION 'Bad results mode'; END IF;
+  UPDATE elections SET results_mode = p_mode WHERE id = v_id;
+  RETURN jsonb_build_object('ok', true, 'results_mode', p_mode);
+END $$;
+
+-- 6b.10 pause / resume voting (temporary halt without closing)
+CREATE OR REPLACE FUNCTION admin_set_paused(p_code text, p_password text, p_paused boolean)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE elections SET is_paused = COALESCE(p_paused,false) WHERE id = v_id;
+  PERFORM _lb_audit(v_id, CASE WHEN p_paused THEN 'election_paused' ELSE 'election_resumed' END, 'admin', '{}'::jsonb);
+  RETURN jsonb_build_object('ok', true, 'is_paused', COALESCE(p_paused,false));
+END $$;
+
+-- 6b.11 open / close the registration form
+CREATE OR REPLACE FUNCTION admin_set_registration_open(p_code text, p_password text, p_open boolean)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE elections SET registration_open = COALESCE(p_open,true) WHERE id = v_id;
+  PERFORM _lb_audit(v_id, 'registration_toggled', 'admin', jsonb_build_object('open', COALESCE(p_open,true)));
+  RETURN jsonb_build_object('ok', true, 'registration_open', COALESCE(p_open,true));
+END $$;
+
+-- 6b.12 toggle candidate self-nomination on the form (one form does both)
+CREATE OR REPLACE FUNCTION admin_set_self_nomination(p_code text, p_password text, p_enable boolean)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE elections SET enable_self_nomination = COALESCE(p_enable,false) WHERE id = v_id;
+  RETURN jsonb_build_object('ok', true, 'enable_self_nomination', COALESCE(p_enable,false));
+END $$;
+
+-- 6b.13 set / change / remove the optional sharing password for an election.
+--       Owner (logged in) can always do this; a delegate may use the current pw.
+--       Pass an empty new password to remove it (owner-only access afterwards).
+CREATE OR REPLACE FUNCTION admin_set_password(p_code text, p_password text, p_new_password text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE elections SET admin_password_hash =
+    CASE WHEN COALESCE(btrim(p_new_password),'') = '' THEN NULL
+         ELSE crypt(p_new_password, gen_salt('bf')) END
+  WHERE id = v_id;
+  RETURN jsonb_build_object('ok', true, 'has_password', COALESCE(btrim(p_new_password),'') <> '');
+END $$;
+
+-- 6b.14 set the custom message a voter sees right after casting their vote
+CREATE OR REPLACE FUNCTION admin_set_vote_message(p_code text, p_password text, p_message text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE elections SET vote_message = NULLIF(btrim(p_message), '') WHERE id = v_id;
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+-- 6b.15 activity log for an election (admin actions, newest first)
+CREATE OR REPLACE FUNCTION admin_get_activity(p_code text, p_password text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'action', a.action, 'actor', a.actor, 'metadata', a.metadata, 'at', a.created_at)
+      ORDER BY a.created_at DESC)
+    FROM audit_log a WHERE a.election_id = v_id), '[]'::jsonb);
+END $$;
+
+-- ============================================================================
+-- 6c. BALLOT SETUP — manage positions & candidates ANY time after creation,
+--     so an organiser can start with just a form and build the vote later.
+-- ============================================================================
+
+-- 6c.1 the full ballot for the admin (every position + candidates of any status)
+CREATE OR REPLACE FUNCTION admin_get_ballot(p_code text, p_password text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', p.id, 'title', p.title, 'max_winners', p.max_winners, 'sort_order', p.sort_order,
+      'candidates', COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'id', c.id, 'name', c.name, 'bio', c.bio, 'status', c.status, 'source', c.source)
+          ORDER BY c.name)
+        FROM candidates c WHERE c.position_id = p.id), '[]'::jsonb))
+      ORDER BY p.sort_order, p.title)
+    FROM positions p WHERE p.election_id = v_id), '[]'::jsonb);
+END $$;
+
+-- 6c.2 add a position
+CREATE OR REPLACE FUNCTION admin_add_position(p_code text, p_password text, p_title text, p_max_winners integer DEFAULT 1)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid; v_new uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  IF COALESCE(btrim(p_title),'') = '' THEN RAISE EXCEPTION 'Position title is required'; END IF;
+  INSERT INTO positions(election_id, title, max_winners, sort_order)
+  VALUES (v_id, btrim(p_title), GREATEST(COALESCE(p_max_winners,1),1),
+          (SELECT COALESCE(max(sort_order)+1,0) FROM positions WHERE election_id = v_id))
+  RETURNING id INTO v_new;
+  PERFORM _lb_audit(v_id, 'position_added', 'admin', jsonb_build_object('title', p_title));
+  RETURN jsonb_build_object('ok', true, 'id', v_new);
+END $$;
+
+-- 6c.3 update a position
+CREATE OR REPLACE FUNCTION admin_update_position(p_code text, p_password text, p_position_id uuid, p_title text, p_max_winners integer DEFAULT 1)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  UPDATE positions SET title = COALESCE(NULLIF(btrim(p_title),''), title),
+                       max_winners = GREATEST(COALESCE(p_max_winners,max_winners),1)
+  WHERE id = p_position_id AND election_id = v_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Position not found'; END IF;
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+-- 6c.4 delete a position (and its candidates/votes, by cascade)
+CREATE OR REPLACE FUNCTION admin_delete_position(p_code text, p_password text, p_position_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  DELETE FROM positions WHERE id = p_position_id AND election_id = v_id;
+  PERFORM _lb_audit(v_id, 'position_deleted', 'admin', jsonb_build_object('position_id', p_position_id));
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+-- 6c.5 add a candidate to a position (admin-entered, approved immediately)
+CREATE OR REPLACE FUNCTION admin_add_candidate(p_code text, p_password text, p_position_id uuid, p_name text, p_bio text DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid; v_new uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM positions WHERE id = p_position_id AND election_id = v_id) THEN
+    RAISE EXCEPTION 'Position not found';
+  END IF;
+  IF COALESCE(btrim(p_name),'') = '' THEN RAISE EXCEPTION 'Candidate name is required'; END IF;
+  INSERT INTO candidates(election_id, position_id, name, bio, source, status)
+  VALUES (v_id, p_position_id, btrim(p_name), NULLIF(btrim(p_bio),''), 'admin_added', 'approved')
+  RETURNING id INTO v_new;
+  PERFORM _lb_audit(v_id, 'candidate_added', 'admin', jsonb_build_object('name', p_name));
+  RETURN jsonb_build_object('ok', true, 'id', v_new);
+END $$;
+
+-- 6c.6 delete a candidate
+CREATE OR REPLACE FUNCTION admin_delete_candidate(p_code text, p_password text, p_candidate_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  v_id := _lb_verify_admin(p_code, p_password);
+  IF v_id IS NULL THEN RAISE EXCEPTION 'Invalid code or password'; END IF;
+  DELETE FROM candidates WHERE id = p_candidate_id AND election_id = v_id;
+  PERFORM _lb_audit(v_id, 'candidate_deleted', 'admin', jsonb_build_object('candidate_id', p_candidate_id));
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+-- ============================================================================
 -- 7. GRANTS — clients may EXECUTE the public-facing RPCs only. No table grants.
 --    Internal helpers (_lb_*) are NOT granted, so anon/authenticated can't call
 --    them directly.
@@ -1235,12 +1854,16 @@ FROM PUBLIC, anon, authenticated;
 -- Grant EXECUTE on all client-facing RPCs (public + admin). Admin functions
 -- are safe to expose because each verifies the bcrypt password internally.
 GRANT EXECUTE ON FUNCTION
-  create_election(text,text,text,text,integer,integer,text,integer,text,boolean,boolean,boolean,timestamptz,timestamptz,timestamptz,timestamptz,jsonb),
+  create_election(text,text,text,text,integer,integer,text,integer,text,boolean,boolean,boolean,boolean,text,timestamptz,timestamptz,timestamptz,timestamptz,jsonb,jsonb),
   get_election_public(text),
   get_turnout(text),
+  get_my_elections(),
+  get_my_election(text),
+  get_form_fields(text),
   register_voter(text,text,text,text,text,text,text,text),
   self_nominate(text,uuid,text,text,text,text,uuid),
   submit_intake(text,jsonb),
+  submit_form_response(text,jsonb,boolean,jsonb),
   cast_vote(text,text,jsonb),
   get_results(text),
   admin_login(text,text),
@@ -1262,5 +1885,25 @@ GRANT EXECUTE ON FUNCTION
   admin_unpublish_results(text,text),
   admin_reset_votes(text,text),
   admin_purge_photos(text,text),
-  admin_delete_election(text,text)
+  admin_delete_election(text,text),
+  admin_set_form_fields(text,text,jsonb),
+  admin_get_responses(text,text),
+  admin_update_response(text,text,uuid,jsonb,boolean,jsonb),
+  admin_delete_response(text,text,uuid),
+  admin_generate_codes(text,text,uuid[]),
+  admin_finalize_election(text,text),
+  admin_unfinalize_election(text,text),
+  admin_set_results_mode(text,text,text),
+  admin_set_paused(text,text,boolean),
+  admin_set_registration_open(text,text,boolean),
+  admin_set_self_nomination(text,text,boolean),
+  admin_set_password(text,text,text),
+  admin_set_vote_message(text,text,text),
+  admin_get_activity(text,text),
+  admin_get_ballot(text,text),
+  admin_add_position(text,text,text,integer),
+  admin_update_position(text,text,uuid,text,integer),
+  admin_delete_position(text,text,uuid),
+  admin_add_candidate(text,text,uuid,text,text),
+  admin_delete_candidate(text,text,uuid)
 TO anon, authenticated;
