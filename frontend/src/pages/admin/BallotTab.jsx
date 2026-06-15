@@ -5,11 +5,12 @@ import {
   adminGetBallot, adminAddPosition, adminDeletePosition,
   adminAddCandidate, adminDeleteCandidate,
   adminApproveCandidate, adminRejectCandidate,
+  subscribeElection, imageUrl,
 } from '../../lib/api'
-import { Plus, Trash2, Check, X, Download } from 'lucide-react'
+import { Plus, Trash2, Check, X, Download, RefreshCw, ImageIcon } from 'lucide-react'
 import { downloadCSV } from '../../lib/csv'
 
-export default function BallotTab({ code, password }) {
+export default function BallotTab({ code, password, electionId }) {
   const toast = useToast()
   const [positions, setPositions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -24,6 +25,13 @@ export default function BallotTab({ code, password }) {
     finally { setLoading(false) }
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [])
+  useEffect(() => {
+    if (!electionId) return
+    const a = subscribeElection('candidates', electionId, () => load())
+    const b = subscribeElection('positions', electionId, () => load())
+    return () => { a(); b() }
+    /* eslint-disable-next-line */
+  }, [electionId])
 
   async function addPosition() {
     if (!pTitle.trim()) return toast('Enter a position title', 'error')
@@ -72,18 +80,24 @@ export default function BallotTab({ code, password }) {
             before or after collecting form responses and nominations.
           </p>
         </div>
-        <button className="btn text-sm shrink-0" disabled={positions.length === 0}
-          onClick={() => {
-            const rows = []
-            positions.forEach((p) => (p.candidates || []).forEach((c) =>
-              rows.push({ position: p.title, candidate: c.name, bio: c.bio || '', status: c.status, source: c.source })))
-            if (!downloadCSV(`${code}-candidates`, rows,
-              [{ key: 'position', label: 'Position' }, { key: 'candidate', label: 'Candidate' },
-               { key: 'bio', label: 'Bio' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' }]))
-              toast('No candidates to export', 'error')
-          }}>
-          <Download size={14} className="inline -mt-1 mr-1" /> Export
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <button className="btn text-sm" onClick={load} title="Refresh">
+            <RefreshCw size={14} className="inline -mt-1 mr-1" /> Refresh
+          </button>
+          <button className="btn text-sm" disabled={positions.length === 0}
+            onClick={() => {
+              const rows = []
+              positions.forEach((p) => (p.candidates || []).forEach((c) =>
+                rows.push({ position: p.title, candidate: c.name, bio: c.bio || '', status: c.status, source: c.source })))
+              if (!downloadCSV(`${code}-candidates`, rows,
+                [{ key: 'position', label: 'Position' }, { key: 'candidate', label: 'Candidate' },
+                 { key: 'bio', label: 'Bio' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' }]))
+                toast('No candidates to export', 'error')
+            }}>
+            <Download size={14} className="inline -mt-1 mr-1" /> Export
+          </button>
+        </div>
+        {electionId && <span className="ml-2 text-xs font-mono text-verify self-center hidden sm:inline">● live</span>}
       </div>
 
       {/* add a position */}
@@ -129,24 +143,7 @@ export default function BallotTab({ code, password }) {
             ) : (
               <ul className="space-y-2">
                 {p.candidates.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-2 border-2 border-rule bg-white px-3 py-2">
-                    <div className="min-w-0">
-                      <span className="font-600">{c.name}</span>
-                      {c.bio && <span className="text-faint text-sm"> — {c.bio}</span>}
-                      <span className="ml-2 text-[11px] font-mono uppercase border border-rule px-1">
-                        {c.status}{c.source === 'self_nominated' ? ' · nominee' : ''}
-                      </span>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {c.status === 'pending' && (
-                        <>
-                          <button className="btn px-2 py-1 text-green-700" title="Approve" onClick={() => approve(c.id)}><Check size={14} /></button>
-                          <button className="btn px-2 py-1 text-ballot" title="Reject" onClick={() => reject(c.id)}><X size={14} /></button>
-                        </>
-                      )}
-                      <button className="btn px-2 py-1" title="Delete" onClick={() => delCandidate(c.id)}><Trash2 size={14} /></button>
-                    </div>
-                  </li>
+                  <CandidateRow key={c.id} c={c} onApprove={approve} onReject={reject} onDelete={delCandidate} />
                 ))}
               </ul>
             )}
@@ -165,5 +162,49 @@ export default function BallotTab({ code, password }) {
         )
       })}
     </div>
+  )
+}
+
+function CandidateRow({ c, onApprove, onReject, onDelete }) {
+  const [url, setUrl] = useState(null)
+  useEffect(() => { if (c.photo_path) imageUrl('candidate-photos', c.photo_path).then(setUrl) }, [c.photo_path])
+  return (
+    <li className="flex items-center justify-between gap-2 border-2 border-rule bg-white px-3 py-2">
+      <div className="flex items-center gap-3 min-w-0">
+        {c.photo_path ? (
+          <div className="h-12 w-12 border-2 border-rule overflow-hidden shrink-0">
+            {url
+              ? <img src={url} alt="" className="h-full w-full object-cover" />
+              : <div className="h-full w-full grid place-items-center text-faint"><ImageIcon size={16} /></div>}
+          </div>
+        ) : c.source === 'self_nominated' ? (
+          <div className="h-12 w-12 border-2 border-dashed border-rule grid place-items-center text-faint shrink-0" title="No photo uploaded">
+            <ImageIcon size={16} />
+          </div>
+        ) : null}
+        <div className="min-w-0">
+          <div className="font-600 truncate">{c.name}</div>
+          {c.bio && <div className="text-faint text-sm truncate">{c.bio}</div>}
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            <span className="text-[11px] font-mono uppercase border border-rule px-1">{c.status}</span>
+            {c.source === 'self_nominated' && (
+              <span className="text-[11px] font-mono uppercase border border-violet text-violet px-1">nominee</span>
+            )}
+            {c.source === 'self_nominated' && !c.photo_path && (
+              <span className="text-[11px] font-mono text-ballot">no photo</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex gap-1 shrink-0">
+        {c.status === 'pending' && (
+          <>
+            <button className="btn px-2 py-1 text-green-700" title="Approve" onClick={() => onApprove(c.id)}><Check size={14} /></button>
+            <button className="btn px-2 py-1 text-ballot" title="Reject" onClick={() => onReject(c.id)}><X size={14} /></button>
+          </>
+        )}
+        <button className="btn px-2 py-1" title="Delete" onClick={() => onDelete(c.id)}><Trash2 size={14} /></button>
+      </div>
+    </li>
   )
 }

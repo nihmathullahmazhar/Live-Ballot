@@ -16,10 +16,34 @@ const LABEL = {
   candidate_added: 'Candidate added', candidate_deleted: 'Candidate deleted',
   candidate_approved: 'Candidate approved', candidate_rejected: 'Candidate rejected',
   photos_purged: 'Photos purged',
+  form_fields_set: 'Form updated',
+  form_submitted: 'New form response',
+  self_nomination: 'Self-nomination',
+  voter_imported: 'Voters imported', bulk_import: 'Voters bulk-imported',
+  voter_code_set: 'Voter code changed', voter_code_regenerated: 'Voter code regenerated',
+  vote_cast: 'Vote cast', intake_converted: 'Response approved',
+  set_max_nominee_positions: 'Nominee limit changed',
+  set_code_format: 'Code format changed',
+  set_whatsapp_template: 'WhatsApp template updated',
+  set_vote_message: 'Post-vote message updated',
+  set_self_nomination: 'Self-nomination toggled',
+  password_set: 'Sharing password set', password_removed: 'Sharing password removed',
+}
+function describeMeta(action, meta) {
+  if (!meta || Object.keys(meta).length === 0) return null
+  if (action === 'codes_generated') return `${meta.count || 0} codes`
+  if (action === 'bulk_import') return `${meta.count || 0} voters` + (meta.with_codes ? ' (codes issued)' : '')
+  if (action === 'set_code_format') return `${meta.format} · ${meta.length} chars`
+  if (action === 'set_max_nominee_positions') return `max = ${meta.value}`
+  if (action === 'self_nomination') return meta.name ? `${meta.name}` : null
+  if (action === 'form_fields_set') return `${meta.count || 0} fields`
+  if (action === 'candidate_added') return meta.name || null
+  if (action === 'position_added') return meta.title || null
+  return JSON.stringify(meta)
 }
 const fmt = (s) => new Date(s).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 
-export default function ActivityTab({ code, password }) {
+export default function ActivityTab({ code, password, electionId }) {
   const toast = useToast()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -64,8 +88,8 @@ export default function ActivityTab({ code, password }) {
             <li key={i} className="panel p-3 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-600">{LABEL[r.action] || r.action}</div>
-                {r.metadata && Object.keys(r.metadata).length > 0 && (
-                  <div className="text-xs text-faint font-mono truncate">{JSON.stringify(r.metadata)}</div>
+                {describeMeta(r.action, r.metadata) && (
+                  <div className="text-xs text-faint truncate">{describeMeta(r.action, r.metadata)}</div>
                 )}
               </div>
               <div className="text-xs font-mono text-faint shrink-0 text-right">

@@ -8,6 +8,7 @@ import {
   adminPurgePhotos, adminDeleteElection,
   adminFinalizeElection, adminUnfinalizeElection, adminSetResultsMode,
   adminSetPaused, adminSetRegistrationOpen, adminSetPassword, adminSetVoteMessage,
+  adminSetMaxNomineePositions, adminSetCodeFormat, adminSetWhatsappTemplate,
 } from '../../lib/api'
 
 export default function ControlsTab({ code, password, settings, onSettingsChange }) {
@@ -21,6 +22,11 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
   const [hasPw, setHasPw] = useState(!!settings.has_password)
   const [shareInput, setShareInput] = useState('')
   const [voteMsg, setVoteMsg] = useState(settings.vote_message || '')
+  const [waTpl, setWaTpl] = useState(settings.whatsapp_template
+    || 'Hello {name}, you are invited to vote in {election}. Your one-time code: *{code}*. Vote here: {link}')
+  const [maxPos, setMaxPos] = useState(settings.max_nominee_positions || 1)
+  const [codeFmt, setCodeFmt] = useState(settings.code_format || 'alphanumeric')
+  const [codeLen, setCodeLen] = useState(settings.code_length || 8)
   const [busy, setBusy] = useState('')
   const inviteLink = typeof window !== 'undefined' ? `${window.location.origin}/e/${code}/admin` : `/e/${code}/admin`
 
@@ -100,6 +106,83 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
               null, () => { onSettingsChange?.({ vote_message: voteMsg.trim() || null }); toast('Message saved', 'success') })}>
             Save message
           </button>
+        </div>
+      </div>
+
+      {/* Voter-code format */}
+      <div className="panel p-6">
+        <Eyebrow>Voter-code format</Eyebrow>
+        <p className="text-sm text-ink/70 mt-1">
+          How the one-time codes look. You can change this any time before voting starts;
+          codes already issued stay the same.
+        </p>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label>
+            <span className="font-display font-700 uppercase text-sm">Format</span>
+            <select className="input mt-1" value={codeFmt} onChange={(e) => setCodeFmt(e.target.value)}>
+              <option value="numeric">Numeric (0-9)</option>
+              <option value="alphanumeric">Alphanumeric (A-Z + 0-9)</option>
+              <option value="special">Letters + numbers + symbols</option>
+            </select>
+          </label>
+          <label>
+            <span className="font-display font-700 uppercase text-sm">Length</span>
+            <input className="input mt-1 w-24" type="number" min={4} max={24}
+              value={codeLen} onChange={(e) => setCodeLen(e.target.value)} />
+          </label>
+          <button className="btn btn-primary" disabled={busy === 'cf'}
+            onClick={() => run('cf',
+              () => adminSetCodeFormat(code, password, codeFmt, Number(codeLen) || 8),
+              null,
+              () => { onSettingsChange?.({ code_format: codeFmt, code_length: Number(codeLen) || 8 }); toast('Code format saved', 'success') })}>
+            Save format
+          </button>
+        </div>
+      </div>
+
+      {/* Max positions a nominee can stand for */}
+      <div className="panel p-6">
+        <Eyebrow>Self-nomination limit</Eyebrow>
+        <p className="text-sm text-ink/70 mt-1">
+          The maximum number of positions one person can stand for in this election.
+        </p>
+        <div className="mt-3 flex items-end gap-3">
+          <label>
+            <span className="font-display font-700 uppercase text-sm">Max positions per person</span>
+            <input className="input mt-1 w-24" type="number" min={1} max={50}
+              value={maxPos} onChange={(e) => setMaxPos(e.target.value)} />
+          </label>
+          <button className="btn btn-primary" disabled={busy === 'mp'}
+            onClick={() => run('mp',
+              () => adminSetMaxNomineePositions(code, password, Number(maxPos) || 1),
+              null,
+              () => { onSettingsChange?.({ max_nominee_positions: Number(maxPos) || 1 }); toast('Limit saved', 'success') })}>
+            Save
+          </button>
+        </div>
+      </div>
+
+      {/* WhatsApp / email message template */}
+      <div className="panel p-6">
+        <Eyebrow>WhatsApp message template</Eyebrow>
+        <p className="text-sm text-ink/70 mt-1">
+          Used when you tap the WhatsApp button next to a voter in Responses. Placeholders get
+          filled in automatically:
+          <span className="font-mono text-xs"> {'{name}'}, {'{code}'}, {'{election}'}, {'{link}'}</span>.
+        </p>
+        <textarea className="input mt-3 min-h-[90px]" value={waTpl}
+          onChange={(e) => setWaTpl(e.target.value)} />
+        <div className="mt-2 flex gap-2 flex-wrap">
+          <button className="btn btn-primary" disabled={busy === 'wa'}
+            onClick={() => run('wa',
+              () => adminSetWhatsappTemplate(code, password, waTpl),
+              null,
+              () => { onSettingsChange?.({ whatsapp_template: waTpl }); toast('Template saved', 'success') })}>
+            Save template
+          </button>
+          <button className="btn text-sm" onClick={() => setWaTpl(
+            'Hello {name}, you are invited to vote in {election}. Your one-time code: *{code}*. Vote here: {link}'
+          )}>Reset to default</button>
         </div>
       </div>
 

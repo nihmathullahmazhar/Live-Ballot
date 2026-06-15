@@ -4,7 +4,7 @@ import Layout from '../components/Layout'
 import InkX from '../components/InkX'
 import { Eyebrow, Rule, Spinner, Stamp } from '../components/ui'
 import { useToast } from '../components/Toast'
-import { getElectionPublic, castVote } from '../lib/api'
+import { getElectionPublic, castVote, imageUrl } from '../lib/api'
 
 export default function VotePage() {
   const { code } = useParams()
@@ -127,21 +127,11 @@ export default function VotePage() {
                 <p className="text-faint font-mono text-sm">No candidates yet for this seat.</p>
               )}
               <div className="grid sm:grid-cols-2 gap-3">
-                {(p.candidates || []).map((c) => {
-                  const selected = choices[p.id] === c.id
-                  return (
-                    <button key={c.id} type="button" onClick={() => pick(p.id, c.id)}
-                      className={`text-left border-2 p-4 flex gap-3 items-start transition ${selected ? 'border-violet bg-white shadow-paper' : 'border-rule bg-white/50 hover:bg-white'}`}>
-                      <span className={`h-9 w-9 shrink-0 border-2 border-rule grid place-items-center bg-white ${selected ? 'text-ballot' : 'text-transparent'}`}>
-                        <InkX size={26} />
-                      </span>
-                      <span>
-                        <span className="font-display font-700 text-lg leading-tight block">{c.name}</span>
-                        {c.bio && <span className="text-sm text-ink/70">{c.bio}</span>}
-                      </span>
-                    </button>
-                  )
-                })}
+                {(p.candidates || []).map((c) => (
+                  <VoteCandidate key={c.id} c={c}
+                    selected={choices[p.id] === c.id}
+                    onPick={() => pick(p.id, c.id)} />
+                ))}
               </div>
             </div>
           ))}
@@ -184,4 +174,29 @@ function PhaseBadge({ phase }) {
   }
   const [kind, label] = map[phase] || ['pending', phase || '—']
   return <Stamp kind={kind}>{label}</Stamp>
+}
+
+function VoteCandidate({ c, selected, onPick }) {
+  const [photo, setPhoto] = useState(null)
+  useEffect(() => { if (c.photo_path) imageUrl('candidate-photos', c.photo_path).then(setPhoto) }, [c.photo_path])
+  return (
+    <button type="button" onClick={onPick}
+      className={`text-left border-2 p-4 flex gap-3 items-start transition ${selected ? 'border-violet bg-white shadow-paper' : 'border-rule bg-white/50 hover:bg-white'}`}>
+      <span className={`h-9 w-9 shrink-0 border-2 border-rule grid place-items-center bg-white ${selected ? 'text-ballot' : 'text-transparent'}`}>
+        <InkX size={26} />
+      </span>
+      {c.photo_path && (
+        <span className="h-16 w-16 shrink-0 border-2 border-rule bg-white overflow-hidden">
+          {photo
+            ? <img src={photo} alt="" className="h-full w-full object-cover" />
+            : <span className="block h-full w-full" />}
+        </span>
+      )}
+      <span className="min-w-0">
+        <span className="font-display font-700 text-lg leading-tight block">{c.name}</span>
+        {c.bio && <span className="text-sm text-ink/70 block">{c.bio}</span>}
+        {c.manifesto && <span className="text-xs text-faint italic block mt-1 line-clamp-3">{c.manifesto}</span>}
+      </span>
+    </button>
+  )
 }

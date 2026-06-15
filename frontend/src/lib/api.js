@@ -226,3 +226,40 @@ async function sha256(file) {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0')).join('')
 }
+
+/* ---------------------- BATCH 1 ADDITIONS --------------------------- */
+export const adminSetMaxNomineePositions = (code, password, max) =>
+  rpc('admin_set_max_nominee_positions', { p_code: code, p_password: password, p_max: max })
+
+export const adminSetCodeFormat = (code, password, format, length) =>
+  rpc('admin_set_code_format', { p_code: code, p_password: password, p_format: format, p_length: length })
+
+export const adminSetWhatsappTemplate = (code, password, template) =>
+  rpc('admin_set_whatsapp_template', { p_code: code, p_password: password, p_template: template })
+
+export const adminBulkImportVoters = (code, password, rows, generateCodes = true) =>
+  rpc('admin_bulk_import_voters', { p_code: code, p_password: password, p_rows: rows, p_generate_codes: generateCodes })
+
+// Subscribe to realtime changes for a given election table.
+// onChange runs on any insert/update/delete. Returns an unsubscribe fn.
+export function subscribeElection(table, electionId, onChange) {
+  if (!electionId) return () => {}
+  const channel = supabase
+    .channel(`rt-${table}-${electionId}`)
+    .on('postgres_changes',
+        { event: '*', schema: 'public', table, filter: `election_id=eq.${electionId}` },
+        () => onChange())
+    .subscribe()
+  return () => { try { supabase.removeChannel(channel) } catch (_) {} }
+}
+
+// Resolve a path in a public-ish image bucket to a signed display URL.
+// Tries the public bucket first, falls back to signed.
+export async function imageUrl(bucket, path) {
+  if (!path) return null
+  try {
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path)
+    if (data?.publicUrl) return data.publicUrl
+  } catch (_) {}
+  return signedUrl(bucket, path, 600)
+}

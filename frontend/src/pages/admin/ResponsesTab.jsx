@@ -1,24 +1,29 @@
-import { useEffect, useState, useCallback } from 'react'
-import { Eyebrow, Rule, Spinner } from '../../components/ui'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { Eyebrow, Spinner } from '../../components/ui'
 import { useToast } from '../../components/Toast'
 import {
-  adminGetResponses, adminDeleteResponse, adminGenerateCodes, adminUpdateResponse, getFormFields,
+  adminGetResponses, adminDeleteResponse, adminGenerateCodes, adminUpdateResponse,
+  getFormFields, subscribeElection, imageUrl,
 } from '../../lib/api'
-import { Trash2, KeyRound, Search, Download, MessageCircle, Mail, Check, X } from 'lucide-react'
+import {
+  Trash2, KeyRound, Search, Download, MessageCircle, Mail, Check, X,
+  RefreshCw, Copy, ImageIcon,
+} from 'lucide-react'
 import { downloadCSV } from '../../lib/csv'
 
-export default function ResponsesTab({ code, password }) {
+export default function ResponsesTab({ code, password, electionId, whatsappTemplate, title }) {
   const toast = useToast()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
-  const [filter, setFilter] = useState('pending')
-  const [sel, setSel] = useState({})            // id -> bool
-  const [issued, setIssued] = useState([])       // results of last generate
+  const [filter, setFilter] = useState('all')
+  const [sel, setSel] = useState({})
+  const [issued, setIssued] = useState([])
   const [busy, setBusy] = useState(false)
-  const [edit, setEdit] = useState(null)         // response being edited
-  const [fields, setFields] = useState([])       // form field definitions (labels/types)
-  const [view, setView] = useState('individual') // 'individual' | 'summary'
+  const [edit, setEdit] = useState(null)
+  const [fields, setFields] = useState([])
+  const [view, setView] = useState('individual')
+  const liveRef = useRef(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -29,19 +34,26 @@ export default function ResponsesTab({ code, password }) {
       ])
       setRows(resp)
       setFields((ff?.fields || []).filter((f) => f.section === 'voter'))
-    }
-    catch (e) { toast(e.message, 'error') }
+    } catch (e) { toast(e.message, 'error') }
     finally { setLoading(false) }
   }, [code, password, toast])
   useEffect(() => { load() }, [load])
 
+  // realtime: refresh on any intake_responses change
+  useEffect(() => {
+    if (!electionId) return
+    const unsub = subscribeElection('intake_responses', electionId, () => {
+      liveRef.current = Date.now(); load()
+    })
+    return unsub
+  }, [electionId, load])
+
   const list = rows.filter((r) => {
     if (filter !== 'all' && r.status !== filter) return false
     if (!q.trim()) return true
-    const hay = `${r.name || ''} ${r.email || ''} ${r.admission_number || ''}`.toLowerCase()
+    const hay = `${r.name || ''} ${r.email || ''} ${r.admission_number || ''} ${r.voter_code || ''}`.toLowerCase()
     return hay.includes(q.toLowerCase())
   })
-
   const selectedIds = Object.keys(sel).filter((id) => sel[id])
 
   async function generate() {
@@ -58,48 +70,50 @@ export default function ResponsesTab({ code, password }) {
   }
 
   async function del(id) {
-    if (!window.confirm('Delete this response?')) return
+    if (!confirm('Delete this response?')) return
     try { await adminDeleteResponse(code, password, id); toast('Deleted', 'success'); load() }
     catch (e) { toast(e.message, 'error') }
   }
 
-  function exportIssued() {
-    const head = ['name', 'email', 'voter_code']
-    const lines = issued.map((x) => [x.name, x.email, x.voter_code].map(csv).join(','))
-    download(`codes-${code}.csv`, [head.join(','), ...lines].join('\n'))
-  }
-
   function exportResponses() {
     const data = list.map((r) => ({
-      name: r.name || '', email: r.email || '', admission_number: r.admission_number || '',
+      name: r.name || '', email: r.email || '', admission: r.admission_number || '',
+      voter_code: r.voter_code || '', voting_status: r.has_voted ? 'voted' : '',
       status: r.status, wants_candidacy: r.wants_candidacy ? 'yes' : 'no',
-      voter_code: r.voter_code || '', answers: r.raw_data || {},
-      submitted: r.created_at ? new Date(r.created_at).toLocaleString() : '',
+      candidate_positions: (r.candidate_positions || []).join(' | '),
+      submitted: r.created_at,
+      ...Object.fromEntries(Object.entries(r.answers || {}).map(([k, v]) =>
+        [`q_${k}`, Array.isArray(v) ? v.join(' | ') : v])),
     }))
     if (!downloadCSV(`${code}-responses`, data)) toast('Nothing to export', 'error')
+  }
+  function exportIssued() {
+    if (issued.length === 0) return
+    downloadCSV(`${code}-codes`, issued)
   }
 
   if (loading && rows.length === 0) return <div className="panel p-6"><Spinner label="Loading responses…" /></div>
 
   return (
     <div className="space-y-4">
-      {/* Controls */}
       <div className="panel p-4 flex flex-wrap gap-3 items-center justify-between">
         <div className="flex gap-2 items-center flex-wrap">
           <div className="relative">
             <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-faint" />
-            <input className="input pl-7 max-w-xs" placeholder="Search name / email"
+            <input className="input pl-7 max-w-xs" placeholder="Search name / email / code"
               value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <select className="input w-auto" value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="all">All</option>
             <option value="pending">Pending</option>
             <option value="converted">Code issued</option>
-            <option value="all">All</option>
           </select>
         </div>
         <div className="flex gap-2">
-          <button className="btn text-sm" disabled={list.length === 0}
-            onClick={() => exportResponses()}>
+          <button className="btn text-sm" onClick={load} title="Refresh">
+            <RefreshCw size={14} className="inline -mt-1 mr-1" /> Refresh
+          </button>
+          <button className="btn text-sm" disabled={list.length === 0} onClick={exportResponses}>
             <Download size={14} className="inline -mt-1 mr-1" /> Export
           </button>
           <button className="btn btn-primary" disabled={busy || selectedIds.length === 0} onClick={generate}>
@@ -109,94 +123,41 @@ export default function ResponsesTab({ code, password }) {
         </div>
       </div>
 
-      {/* view toggle — like Google Forms */}
       <div className="flex gap-2 items-center">
         {[['individual', 'Individual'], ['summary', 'Summary']].map(([v, l]) => (
           <button key={v} onClick={() => setView(v)}
             className={`btn text-sm ${view === v ? 'btn-primary' : ''}`}>{l}</button>
         ))}
-        <span className="ml-auto eyebrow">{list.length} of {rows.length} responses</span>
+        <span className="ml-auto eyebrow">
+          {list.length} of {rows.length} responses
+          {electionId && <span className="ml-2 text-verify font-mono">● live</span>}
+        </span>
       </div>
 
-      {/* Issued panel + distribution */}
       {issued.length > 0 && (
         <div className="panel p-5 border-verify">
-          <div className="flex items-center justify-between">
-            <Eyebrow className="text-verify">Codes just issued — distribute them</Eyebrow>
+          <div className="flex items-center justify-between mb-2">
+            <Eyebrow className="text-verify">Codes just issued — share via WhatsApp / email / copy</Eyebrow>
             <button className="btn text-sm" onClick={exportIssued}>
               <Download size={14} className="inline -mt-1 mr-1" /> CSV
             </button>
           </div>
-          <div className="mt-3 space-y-2 max-h-72 overflow-auto">
-            {issued.map((x) => {
-              const msg = `Your voting code for the election (${code}) is: ${x.voter_code}. Vote here: ${window.location.origin}/e/${code}`
-              const wa = `https://wa.me/?text=${encodeURIComponent(msg)}`
-              const mail = `mailto:${x.email || ''}?subject=${encodeURIComponent('Your voting code')}&body=${encodeURIComponent(msg)}`
-              return (
-                <div key={x.registration_id} className="flex flex-wrap items-center gap-2 justify-between border-2 border-rule bg-white px-3 py-2">
-                  <span className="text-sm">{x.name || 'Unnamed'} <span className="text-faint">·</span> <span className="font-mono">{x.voter_code}</span></span>
-                  <div className="flex gap-2">
-                    <a className="btn px-2 py-1 text-sm text-verify" href={wa} target="_blank" rel="noreferrer"><MessageCircle size={14} /></a>
-                    <a className="btn px-2 py-1 text-sm" href={mail}><Mail size={14} /></a>
-                    <button className="btn px-2 py-1 text-sm" onClick={() => { navigator.clipboard?.writeText(x.voter_code); toast('Copied', 'success') }}>Copy</button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-xs text-faint mt-2">
-            WhatsApp/email buttons open a prepared message (no API needed). Bulk auto-send via
-            WhatsApp Business API / Resend can be wired later.
-          </p>
+          <IssuedList issued={issued} code={code} title={title}
+            whatsappTemplate={whatsappTemplate} toast={toast} />
         </div>
       )}
 
-      {/* SUMMARY view — per-question breakdown, like Google Forms */}
-      {view === 'summary' && (
-        <Summary rows={list} fields={fields} />
-      )}
+      {view === 'summary' && <Summary rows={list} fields={fields} />}
 
-      {/* INDIVIDUAL view — each response with all answers */}
       {view === 'individual' && (
-      <div className="panel divide-y-2 divide-rule/30">
-        {list.length === 0 && <div className="p-6 text-faint text-sm">No responses.</div>}
-        {list.map((r) => (
-          <div key={r.id} className="p-4">
-            <div className="flex flex-wrap items-start gap-3 justify-between">
-              <div className="flex items-start gap-3 min-w-0">
-                {r.status === 'pending' && (
-                  <input type="checkbox" className="mt-1" checked={!!sel[r.id]}
-                    onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} />
-                )}
-                <div className="min-w-0">
-                  <div className="font-display font-700">
-                    {r.name || 'Unnamed'}
-                    {r.wants_candidacy && <span className="ml-2 text-xs font-mono text-violet">candidate</span>}
-                    {r.dup_email && <span className="ml-2 text-xs font-mono text-ballot">⚑ dup email</span>}
-                    {r.dup_admission && <span className="ml-2 text-xs font-mono text-ballot">⚑ dup ID</span>}
-                    <span className={`ml-2 text-xs font-mono ${r.status === 'converted' ? 'text-verify' : 'text-faint'}`}>· {r.status}</span>
-                  </div>
-                  {r.created_at && <div className="text-xs text-faint font-mono">{new Date(r.created_at).toLocaleString()}</div>}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>View / edit</button>
-                <button className="btn btn-danger px-3" onClick={() => del(r.id)}><Trash2 size={15} /></button>
-              </div>
-            </div>
-
-            {/* answers, labeled like a form submission */}
-            <dl className="mt-3 grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-              {answerRows(r, fields).map(({ label, value }, k) => (
-                <div key={k} className="flex gap-2 border-b border-dashed border-rule/40 py-1">
-                  <dt className="text-faint min-w-[8rem] shrink-0">{label}</dt>
-                  <dd className="font-600 break-words">{value || <span className="text-faint font-normal">—</span>}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        ))}
-      </div>
+        <div className="panel divide-y-2 divide-rule/30">
+          {list.length === 0 && <div className="p-6 text-faint text-sm">No responses.</div>}
+          {list.map((r) => (
+            <ResponseCard key={r.id} r={r} fields={fields} code={code}
+              sel={sel} setSel={setSel} setEdit={setEdit} del={del}
+              whatsappTemplate={whatsappTemplate} title={title} toast={toast} />
+          ))}
+        </div>
       )}
 
       {edit && (
@@ -207,60 +168,167 @@ export default function ResponsesTab({ code, password }) {
   )
 }
 
+/* ------------ one response card with photo + answers + code ----------- */
+function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemplate, title, toast }) {
+  const [photo, setPhoto] = useState(null)
+  useEffect(() => {
+    if (r.candidate_photo_path) imageUrl('candidate-photos', r.candidate_photo_path).then(setPhoto)
+  }, [r.candidate_photo_path])
+  const wa = waLink(r, code, title, whatsappTemplate)
+  const mail = mailLink(r, code, title)
+
+  return (
+    <div className="p-4">
+      <div className="flex flex-wrap items-start gap-3 justify-between">
+        <div className="flex items-start gap-3 min-w-0">
+          {r.status === 'pending' && (
+            <input type="checkbox" className="mt-1" checked={!!sel[r.id]}
+              onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} />
+          )}
+          {/* candidate photo if any */}
+          {r.candidate_photo_path ? (
+            <div className="h-14 w-14 border-2 border-rule bg-white overflow-hidden shrink-0">
+              {photo
+                ? <img src={photo} alt="" className="h-full w-full object-cover" />
+                : <div className="h-full w-full grid place-items-center text-faint"><ImageIcon size={18} /></div>}
+            </div>
+          ) : r.wants_candidacy ? (
+            <div className="h-14 w-14 border-2 border-dashed border-rule grid place-items-center text-faint shrink-0">
+              <ImageIcon size={18} />
+            </div>
+          ) : null}
+          <div className="min-w-0">
+            <div className="font-display font-700 flex flex-wrap items-center gap-2">
+              {r.name || 'Unnamed'}
+              {r.voter_code && (
+                <button onClick={() => { navigator.clipboard?.writeText(r.voter_code); toast('Code copied', 'success') }}
+                  className="text-xs font-mono px-2 py-0.5 border-2 border-verify text-verify bg-white hover:bg-verify hover:text-white"
+                  title="Click to copy">
+                  <KeyRound size={11} className="inline -mt-0.5 mr-1" />{r.voter_code}
+                </button>
+              )}
+              {r.wants_candidacy && (
+                <span className="text-xs font-mono text-violet">candidate
+                  {r.candidate_positions?.length > 0 && ` · ${r.candidate_positions.join(', ')}`}</span>
+              )}
+              {r.has_voted && <span className="text-xs font-mono text-verify">✓ voted</span>}
+              {r.dup_email && <span className="text-xs font-mono text-ballot">⚑ dup email</span>}
+              {r.dup_admission && <span className="text-xs font-mono text-ballot">⚑ dup ID</span>}
+              <span className={`text-xs font-mono ${r.status === 'converted' ? 'text-verify' : 'text-faint'}`}>· {r.status}</span>
+            </div>
+            {r.created_at && <div className="text-xs text-faint font-mono">{new Date(r.created_at).toLocaleString()}</div>}
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {r.voter_code && (
+            <>
+              <a className="btn px-2 py-1 text-sm text-verify" href={wa} target="_blank" rel="noreferrer" title="WhatsApp">
+                <MessageCircle size={14} />
+              </a>
+              <a className="btn px-2 py-1 text-sm" href={mail} title="Email">
+                <Mail size={14} />
+              </a>
+              <button className="btn px-2 py-1 text-sm" onClick={() => { navigator.clipboard?.writeText(r.voter_code); toast('Copied', 'success') }} title="Copy code">
+                <Copy size={14} />
+              </button>
+            </>
+          )}
+          <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>View / edit</button>
+          <button className="btn btn-danger px-3" onClick={() => del(r.id)}><Trash2 size={15} /></button>
+        </div>
+      </div>
+
+      <dl className="mt-3 grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        {answerRows(r, fields).map(({ label, value, isFile }, k) => (
+          <div key={k} className="flex gap-2 border-b border-dashed border-rule/40 py-1">
+            <dt className="text-faint min-w-[8rem] shrink-0">{label}</dt>
+            <dd className="font-600 break-words">
+              {isFile
+                ? <FilePreview path={value} bucket="voter-photos" />
+                : (value || <span className="text-faint font-normal">—</span>)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+function FilePreview({ path, bucket }) {
+  const [url, setUrl] = useState(null)
+  useEffect(() => { if (path) imageUrl(bucket, path).then(setUrl) }, [path, bucket])
+  if (!path) return <span className="text-faint font-normal">—</span>
+  return (
+    <a href={url || '#'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 underline text-violet">
+      {url && <img src={url} className="h-10 w-10 object-cover border border-rule" alt="" />}
+      View file
+    </a>
+  )
+}
+
+function IssuedList({ issued, code, title, whatsappTemplate, toast }) {
+  return (
+    <div className="space-y-1.5">
+      {issued.map((x, i) => {
+        const r = { name: x.name, email: x.email, voter_code: x.voter_code, answers: { phone: x.phone } }
+        return (
+          <div key={i} className="flex flex-wrap items-center gap-2 text-sm border-b border-dashed border-rule/30 py-1">
+            <span className="font-display font-700 min-w-[10rem]">{x.name || '—'}</span>
+            <span className="font-mono text-xs text-faint">{x.email}</span>
+            <span className="font-mono text-xs px-2 py-0.5 border-2 border-verify text-verify">{x.voter_code}</span>
+            <span className="ml-auto flex gap-1">
+              <a className="btn px-2 py-1 text-xs text-verify" href={waLink(r, code, title, whatsappTemplate)} target="_blank" rel="noreferrer"><MessageCircle size={12} /></a>
+              <a className="btn px-2 py-1 text-xs" href={mailLink(r, code, title)}><Mail size={12} /></a>
+              <button className="btn px-2 py-1 text-xs" onClick={() => { navigator.clipboard?.writeText(x.voter_code); toast('Copied', 'success') }}><Copy size={12} /></button>
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function EditModal({ r, code, password, toast, onClose, onSaved }) {
   const [answers, setAnswers] = useState(r.answers || {})
   const [busy, setBusy] = useState(false)
   const keys = Object.keys(answers)
-
   async function save() {
     setBusy(true)
-    try { await adminUpdateResponse(code, password, r.id, answers, null, null); toast('Saved', 'success'); onSaved() }
-    catch (e) { toast(e.message, 'error') }
+    try {
+      await adminUpdateResponse(code, password, r.id, answers)
+      toast('Saved', 'success'); onSaved()
+    } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
   }
-
   return (
-    <div className="fixed inset-0 z-50 bg-ink/70 grid place-items-center p-4" onClick={onClose}>
-      <div className="panel p-6 bg-paper max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <Eyebrow>Edit response</Eyebrow>
-          <button className="btn px-2 py-1" onClick={onClose}><X size={15} /></button>
+    <div className="fixed inset-0 bg-ink/40 grid place-items-center p-4 z-50" onClick={onClose}>
+      <div className="bg-paper border-4 border-ink p-5 max-w-xl w-full max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-display font-900 text-xl uppercase">Edit response</h3>
+          <button className="btn px-2" onClick={onClose}><X size={16} /></button>
         </div>
-        <Rule />
-        <div className="space-y-3 max-h-[55vh] overflow-auto">
-          {keys.length === 0 && <p className="text-faint text-sm">No stored answers.</p>}
+        <div className="space-y-2">
+          {keys.length === 0 && <p className="text-sm text-faint">No fields.</p>}
           {keys.map((k) => (
             <label key={k} className="block">
               <span className="eyebrow">{k}</span>
-              <input className="input"
-                value={Array.isArray(answers[k]) ? answers[k].join(', ') : (answers[k] ?? '')}
+              <input className="input" value={String(answers[k] ?? '')}
                 onChange={(e) => setAnswers((a) => ({ ...a, [k]: e.target.value }))} />
             </label>
           ))}
         </div>
-        {r.wants_candidacy && (
-          <p className="text-xs text-violet mt-3 font-mono">
-            This person opted into candidacy. Approve their position(s) in the Nominations tab after issuing a code.
-          </p>
-        )}
-        <div className="mt-4 flex gap-2">
-          <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+        <div className="mt-4 flex gap-2 justify-end">
           <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={busy} onClick={save}>
+            {busy ? 'Saving…' : <><Check size={14} className="inline -mt-1 mr-1" /> Save</>}
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
-/* csv helpers */
-function csv(v) { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
-function download(name, content) {
-  const blob = new Blob([content], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob); const a = document.createElement('a')
-  a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
-}
-
-// ---- helpers: read an answer + build labeled rows + summary aggregation ----
+/* ---- helpers ---- */
 function valOf(r, key) {
   let v = r.answers?.[key]
   if (v === undefined || v === null || v === '') {
@@ -271,10 +339,13 @@ function valOf(r, key) {
   if (Array.isArray(v)) return v.join(', ')
   return v == null ? '' : String(v)
 }
-
 function answerRows(r, fields) {
   if (fields && fields.length) {
-    return fields.map((f) => ({ label: f.label || f.field_key, value: valOf(r, f.field_key) }))
+    return fields.map((f) => ({
+      label: f.label || f.field_key,
+      value: valOf(r, f.field_key),
+      isFile: f.field_type === 'document',
+    }))
   }
   const out = []
   if (r.name) out.push({ label: 'Name', value: r.name })
@@ -283,6 +354,24 @@ function answerRows(r, fields) {
   Object.entries(r.answers || {}).forEach(([k, v]) =>
     out.push({ label: k, value: Array.isArray(v) ? v.join(', ') : String(v ?? '') }))
   return out
+}
+function waLink(r, code, title, template) {
+  const phone = String(r.answers?.phone || r.answers?.phone_number || r.answers?.whatsapp || '').replace(/[^0-9]/g, '')
+  const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${code}`
+  const msg = (template || 'Hello {name}, your one-time code for {election}: *{code}*. Vote here: {link}')
+    .replaceAll('{name}', r.name || '')
+    .replaceAll('{code}', r.voter_code || '')
+    .replaceAll('{election}', title || '')
+    .replaceAll('{link}', link)
+    .replaceAll('{election_link}', link)
+  const text = encodeURIComponent(msg)
+  return phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`
+}
+function mailLink(r, code, title) {
+  const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${code}`
+  const subj = encodeURIComponent(`Your voting code for ${title || code}`)
+  const body = encodeURIComponent(`Hello ${r.name || ''},\n\nYour one-time voting code is: ${r.voter_code}\n\nVote here: ${link}\n`)
+  return `mailto:${r.email || ''}?subject=${subj}&body=${body}`
 }
 
 function Summary({ rows, fields }) {
@@ -318,11 +407,8 @@ function Summary({ rows, fields }) {
     </div>
   )
 }
-
 function ChoiceBars({ rows, field, options }) {
-  const counts = {}
-  options.forEach((o) => { counts[o] = 0 })
-  let blank = 0
+  const counts = {}; options.forEach((o) => { counts[o] = 0 }); let blank = 0
   rows.forEach((r) => {
     const raw = r.answers?.[field.field_key]
     if (field.field_type === 'checkbox') {

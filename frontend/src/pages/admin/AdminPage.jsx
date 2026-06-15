@@ -98,6 +98,10 @@ export default function AdminPage() {
 
   const ctx = {
     code, password, settings: auth, toast,
+    electionId: auth?.election_id,
+    title: auth?.title,
+    whatsappTemplate: auth?.whatsapp_template,
+    maxNomineePositions: auth?.max_nominee_positions,
     onSettingsChange: (patch) => setAuth((a) => ({ ...a, ...patch })),
   }
 
