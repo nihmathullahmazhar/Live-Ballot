@@ -4,7 +4,7 @@ import Layout from '../../components/Layout'
 import InkX from '../../components/InkX'
 import { Eyebrow, Spinner } from '../../components/ui'
 import { useToast } from '../../components/Toast'
-import { adminLogin } from '../../lib/api'
+import { adminLogin, adminLogSession } from '../../lib/api'
 import { supabase } from '../../lib/supabase'
 import { rememberElection } from '../../lib/localElections'
 import TallyTab from './TallyTab'
@@ -14,6 +14,7 @@ import FormBuilderTab from './FormBuilderTab'
 import ResponsesTab from './ResponsesTab'
 import ActivityTab from './ActivityTab'
 import ControlsTab from './ControlsTab'
+import PostersTab from './PostersTab'
 
 const TABS = [
   ['form', 'Form'],
@@ -21,6 +22,7 @@ const TABS = [
   ['responses', 'Responses'],
   ['voters', 'Voters'],
   ['tally', 'Tally'],
+  ['posters', 'Posters'],
   ['activity', 'Activity'],
   ['controls', 'Controls'],
 ]
@@ -57,9 +59,20 @@ export default function AdminPage() {
     setBusy(true)
     try {
       const settings = await adminLogin(code, password)
+      // Non-owner = delegate. Identify them so changes can be traced back.
+      const lsKey = `lb:delegate-name:${code}`
+      let name = localStorage.getItem(lsKey)
+      if (!name) {
+        name = window.prompt('Your name (so the organiser knows who made changes):')
+        if (name) name = name.trim()
+        if (name) localStorage.setItem(lsKey, name)
+      }
+      if (name) {
+        try { await adminLogSession(code, password, name) } catch (_) {}
+      }
       setAuth(settings)
       rememberElection(settings.code, settings.title)
-      toast('Welcome, committee', 'success')
+      toast(name ? `Welcome, ${name}` : 'Welcome, committee', 'success')
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
   }
@@ -165,6 +178,7 @@ export default function AdminPage() {
         {tab === 'responses' && <ResponsesTab {...ctx} />}
         {tab === 'voters' && <VotersTab {...ctx} />}
         {tab === 'activity' && <ActivityTab {...ctx} />}
+        {tab === 'posters' && <PostersTab {...ctx} />}
         {tab === 'controls' && <ControlsTab {...ctx} />}
       </div>
       <div className="h-10" />
