@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useNavigate } from 'react-router-dom'
 import { Eyebrow, Rule } from '../../components/ui'
@@ -9,8 +9,10 @@ import {
   adminFinalizeElection, adminUnfinalizeElection, adminSetResultsMode,
   adminSetPaused, adminSetRegistrationOpen, adminSetPassword, adminSetVoteMessage,
   adminSetMaxNomineePositions, adminSetCodeFormat, adminSetWhatsappTemplate,
-  adminSetWindows,
+  adminSetWindows, adminGetSyncToken, adminRotateSyncToken,
 } from '../../lib/api'
+import { supabaseUrl, supabaseAnonKey } from '../../lib/supabase'
+import { Copy } from 'lucide-react'
 
 export default function ControlsTab({ code, password, settings, onSettingsChange }) {
   const toast = useToast()
@@ -40,7 +42,13 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
   const [nomClose, setNomClose] = useState(toLocalInput(settings.nominations_close_at))
   const [voteOpen, setVoteOpen]   = useState(toLocalInput(settings.voting_open_at))
   const [voteClose, setVoteClose] = useState(toLocalInput(settings.voting_close_at))
+  const [syncToken, setSyncToken] = useState(null)
   const [busy, setBusy] = useState('')
+
+  useEffect(() => {
+    adminGetSyncToken(code, password).then((r) => setSyncToken(r?.sync_token || null)).catch(() => {})
+    // eslint-disable-next-line
+  }, [])
   const inviteLink = typeof window !== 'undefined' ? `${window.location.origin}/e/${code}/admin` : `/e/${code}/admin`
 
   async function run(key, fn, confirmMsg, after) {
@@ -281,6 +289,67 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
         </div>
       </div>
 
+      {/* Google Sheets live sync */}
+      <div className="panel p-6">
+        <Eyebrow>Google Sheets sync</Eyebrow>
+        <p className="text-sm text-ink/70 mt-1">
+          Mirror this election into a Google Sheet that updates automatically every few minutes — responses,
+          voters, candidates, live vote counts. Free, no third-party service.
+        </p>
+
+        {!syncToken && (
+          <div className="mt-3">
+            <button className="btn btn-primary" disabled={busy === 'tok'}
+              onClick={() => run('tok',
+                () => adminRotateSyncToken(code, password),
+                'Generate a sync token? Keep it private — anyone with this token can read (but not change) your election data.',
+                (r) => { setSyncToken(r.sync_token); toast('Sync token created', 'success') })}>
+              Generate sync token
+            </button>
+          </div>
+        )}
+
+        {syncToken && (
+          <>
+            <div className="mt-3 space-y-2 text-sm">
+              <SyncRow label="Project URL" value={supabaseUrl} />
+              <SyncRow label="Election code" value={code} />
+              <SyncRow label="Sync token" value={syncToken} secret />
+              <SyncRow label="Anon key" value={supabaseAnonKey} secret />
+            </div>
+
+            <details className="mt-4 border-2 border-rule bg-white/40 p-3">
+              <summary className="font-display font-700 uppercase text-sm cursor-pointer">
+                Setup steps (Google Sheets · 5 min, one-time)
+              </summary>
+              <ol className="mt-2 list-decimal pl-5 text-sm space-y-1">
+                <li>Open a new Google Sheet at <a className="underline text-violet" href="https://sheets.new" target="_blank" rel="noreferrer">sheets.new</a>.</li>
+                <li>Menu: <b>Extensions → Apps Script</b>.</li>
+                <li>Delete the placeholder code, paste the script below, then <b>Save</b> (💾).</li>
+                <li>Run the function <b>setup</b> once (top toolbar → choose <b>setup</b> → ▶ Run). Approve permissions when asked — this is your own script accessing your own sheet.</li>
+                <li>That's it. The sheet now refreshes every 5 minutes automatically. To force a refresh, run <b>sync</b> manually.</li>
+              </ol>
+              <button className="btn text-sm mt-3" onClick={() => {
+                const txt = appsScriptTemplate({ url: supabaseUrl, anon: supabaseAnonKey, code, token: syncToken })
+                navigator.clipboard?.writeText(txt).then(() => toast('Script copied — paste into Apps Script', 'success'))
+              }}>
+                <Copy size={14} className="inline -mt-1 mr-1" /> Copy Apps Script
+              </button>
+            </details>
+
+            <div className="mt-3 flex gap-2 flex-wrap">
+              <button className="btn text-sm" disabled={busy === 'rot'}
+                onClick={() => run('rot',
+                  () => adminRotateSyncToken(code, password),
+                  'Rotate the sync token? Existing Google Sheets using the old token will stop working until you update them with the new one.',
+                  (r) => { setSyncToken(r.sync_token); toast('Token rotated', 'success') })}>
+                Rotate token
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Finalization gate */}
       <div className="panel p-6">
         <Eyebrow>Finalization (the voting gate)</Eyebrow>
@@ -434,4 +503,129 @@ function Row({ title, desc, children }) {
       {children}
     </div>
   )
+}
+
+function SyncRow({ label, value, secret }) {
+  const [show, setShow] = useState(!secret)
+  const shown = show ? value : '•'.repeat(Math.min(24, value?.length || 8))
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-faint min-w-[7rem] shrink-0">{label}</span>
+      <code className="flex-1 break-all border-2 border-rule bg-white px-2 py-1 text-xs">{shown}</code>
+      {secret && (
+        <button className="btn px-2 py-1 text-xs" onClick={() => setShow((v) => !v)}>
+          {show ? 'Hide' : 'Show'}
+        </button>
+      )}
+      <button className="btn px-2 py-1 text-xs"
+        onClick={() => navigator.clipboard?.writeText(value)} title="Copy">
+        <Copy size={12} />
+      </button>
+    </div>
+  )
+}
+
+function appsScriptTemplate({ url, anon, code, token }) {
+  return `/**
+ * Live Ballot → Google Sheets sync
+ * Auto-pulls responses, voters, candidates, vote tallies every 5 minutes.
+ * Generated for election ${code}. Keep this script private.
+ */
+const SUPABASE_URL  = ${JSON.stringify(url)};
+const SUPABASE_ANON = ${JSON.stringify(anon)};
+const ELECTION_CODE = ${JSON.stringify(code)};
+const SYNC_TOKEN    = ${JSON.stringify(token)};
+
+function setup() {
+  // create the time-driven trigger (every 5 minutes)
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => { if (t.getHandlerFunction() === 'sync') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('sync').timeBased().everyMinutes(5).create();
+  sync();
+  SpreadsheetApp.getActive().toast('Live Ballot sync set up — refreshes every 5 minutes');
+}
+
+function sync() {
+  const res = UrlFetchApp.fetch(SUPABASE_URL + '/rest/v1/rpc/sheet_sync', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON },
+    payload: JSON.stringify({ p_code: ELECTION_CODE, p_token: SYNC_TOKEN }),
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() >= 300) {
+    throw new Error('Sync failed: ' + res.getContentText());
+  }
+  const data = JSON.parse(res.getContentText());
+  const ss = SpreadsheetApp.getActive();
+
+  writeSheet_(ss, 'Responses', data.responses, [
+    ['Submitted', r => fmtDate_(r.created_at)],
+    ['Name', r => r.name],
+    ['Email', r => r.email],
+    ['Phone', r => r.phone],
+    ['Admission #', r => r.admission_number],
+    ['Voter code', r => r.voter_code || ''],
+    ['Voted?', r => r.has_voted ? '✓' : ''],
+    ['Status', r => r.status],
+    ['Wants candidacy', r => r.wants_candidacy ? 'YES' : ''],
+    ['Standing for', r => (r.candidate_positions || []).join(', ')],
+    ['Answers', r => JSON.stringify(r.answers || {})],
+  ]);
+
+  writeSheet_(ss, 'Voters', data.voters, [
+    ['Created', r => fmtDate_(r.created_at)],
+    ['Name', r => r.name],
+    ['Email', r => r.email],
+    ['Admission #', r => r.admission_number],
+    ['Voter code', r => r.voter_code || ''],
+    ['Voted?', r => r.has_voted ? '✓' : ''],
+    ['Status', r => r.status],
+  ]);
+
+  const tally = [];
+  (data.positions || []).forEach(p => {
+    (p.candidates || []).forEach(c => {
+      tally.push({ position: p.title, candidate: c.name,
+                   status: c.status, source: c.source, votes: c.votes });
+    });
+  });
+  writeSheet_(ss, 'Candidates & Tally', tally, [
+    ['Position',  r => r.position],
+    ['Candidate', r => r.candidate],
+    ['Status',    r => r.status],
+    ['Source',    r => r.source],
+    ['Votes',     r => r.votes],
+  ]);
+
+  writeSheet_(ss, 'Sync info', [{
+    election: data.election.code, title: data.election.title,
+    phase: data.election.phase, fetched: fmtDate_(data.election.fetched_at),
+  }], [
+    ['Election', r => r.election],
+    ['Title',    r => r.title],
+    ['Phase',    r => r.phase],
+    ['Last sync',r => r.fetched],
+  ]);
+}
+
+function writeSheet_(ss, name, rows, cols) {
+  let sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  sh.clear();
+  const header = cols.map(c => c[0]);
+  const body = (rows || []).map(r => cols.map(c => c[1](r)));
+  sh.getRange(1, 1, 1, header.length).setValues([header])
+    .setFontWeight('bold').setBackground('#f3f3f3');
+  if (body.length) sh.getRange(2, 1, body.length, header.length).setValues(body);
+  sh.setFrozenRows(1);
+  sh.autoResizeColumns(1, header.length);
+}
+
+function fmtDate_(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+}
+`
 }

@@ -7,6 +7,8 @@ const url = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.c
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key'
 
 export const supabase = createClient(url, anon)
+export const supabaseUrl = url
+export const supabaseAnonKey = anon
 
 export const isConfigured =
   Boolean(import.meta.env.VITE_SUPABASE_URL) &&

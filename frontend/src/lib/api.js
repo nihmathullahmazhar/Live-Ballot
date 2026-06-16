@@ -248,6 +248,12 @@ export const adminSetWindows = (code, password, opts = {}) =>
     p_clear_voting:         opts.clear_voting         ?? false,
   })
 
+export const adminGetSyncToken = (code, password) =>
+  rpc('admin_get_sync_token', { p_code: code, p_password: password })
+
+export const adminRotateSyncToken = (code, password) =>
+  rpc('admin_rotate_sync_token', { p_code: code, p_password: password })
+
 export const adminBulkImportVoters = (code, password, rows, generateCodes = true) =>
   rpc('admin_bulk_import_voters', { p_code: code, p_password: password, p_rows: rows, p_generate_codes: generateCodes })
 
