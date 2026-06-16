@@ -9,6 +9,7 @@ import {
   adminFinalizeElection, adminUnfinalizeElection, adminSetResultsMode,
   adminSetPaused, adminSetRegistrationOpen, adminSetPassword, adminSetVoteMessage,
   adminSetMaxNomineePositions, adminSetCodeFormat, adminSetWhatsappTemplate,
+  adminSetWindows,
 } from '../../lib/api'
 
 export default function ControlsTab({ code, password, settings, onSettingsChange }) {
@@ -27,6 +28,18 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
   const [maxPos, setMaxPos] = useState(settings.max_nominee_positions || 1)
   const [codeFmt, setCodeFmt] = useState(settings.code_format || 'alphanumeric')
   const [codeLen, setCodeLen] = useState(settings.code_length || 8)
+  // schedule window inputs (datetime-local needs "YYYY-MM-DDTHH:mm" with no TZ)
+  const toLocalInput = (iso) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    if (isNaN(d)) return ''
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+  const [nomOpen, setNomOpen]   = useState(toLocalInput(settings.nominations_open_at))
+  const [nomClose, setNomClose] = useState(toLocalInput(settings.nominations_close_at))
+  const [voteOpen, setVoteOpen]   = useState(toLocalInput(settings.voting_open_at))
+  const [voteClose, setVoteClose] = useState(toLocalInput(settings.voting_close_at))
   const [busy, setBusy] = useState('')
   const inviteLink = typeof window !== 'undefined' ? `${window.location.origin}/e/${code}/admin` : `/e/${code}/admin`
 
@@ -106,6 +119,88 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
               null, () => { onSettingsChange?.({ vote_message: voteMsg.trim() || null }); toast('Message saved', 'success') })}>
             Save message
           </button>
+        </div>
+      </div>
+
+      {/* Election schedule (nominations + voting windows) */}
+      <div className="panel p-6">
+        <Eyebrow>Election schedule</Eyebrow>
+        <p className="text-sm text-ink/70 mt-1">
+          Optional. If you set a nominations window, self-nominations are accepted only inside it.
+          If you set a voting window, voting opens automatically when it starts and closes when it ends.
+          Leave any field blank to skip that gate.
+        </p>
+
+        <div className="mt-4 grid sm:grid-cols-2 gap-4">
+          <div className="border-2 border-rule p-3 bg-white/40">
+            <div className="font-display font-700 uppercase text-sm">Nominations window</div>
+            <p className="text-xs text-faint mt-0.5">When candidates can apply</p>
+            <label className="block mt-2">
+              <span className="eyebrow">Opens</span>
+              <input type="datetime-local" className="input"
+                value={nomOpen} onChange={(e) => setNomOpen(e.target.value)} />
+            </label>
+            <label className="block mt-2">
+              <span className="eyebrow">Closes</span>
+              <input type="datetime-local" className="input"
+                value={nomClose} onChange={(e) => setNomClose(e.target.value)} />
+            </label>
+            <button className="btn text-xs mt-2"
+              onClick={() => run('nw_clear',
+                () => adminSetWindows(code, password, { clear_nominations: true }),
+                'Clear nomination dates?',
+                () => { setNomOpen(''); setNomClose(''); onSettingsChange?.({ nominations_open_at: null, nominations_close_at: null }); toast('Nominations dates cleared', 'success') })}>
+              Clear nominations
+            </button>
+          </div>
+
+          <div className="border-2 border-rule p-3 bg-white/40">
+            <div className="font-display font-700 uppercase text-sm">Voting window</div>
+            <p className="text-xs text-faint mt-0.5">When ballots can be cast</p>
+            <label className="block mt-2">
+              <span className="eyebrow">Opens</span>
+              <input type="datetime-local" className="input"
+                value={voteOpen} onChange={(e) => setVoteOpen(e.target.value)} />
+            </label>
+            <label className="block mt-2">
+              <span className="eyebrow">Closes</span>
+              <input type="datetime-local" className="input"
+                value={voteClose} onChange={(e) => setVoteClose(e.target.value)} />
+            </label>
+            <button className="btn text-xs mt-2"
+              onClick={() => run('vw_clear',
+                () => adminSetWindows(code, password, { clear_voting: true }),
+                'Clear voting dates?',
+                () => { setVoteOpen(''); setVoteClose(''); onSettingsChange?.({ voting_open_at: null, voting_close_at: null }); toast('Voting dates cleared', 'success') })}>
+              Clear voting
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <button className="btn btn-primary" disabled={busy === 'win'}
+            onClick={() => {
+              const toIso = (s) => s ? new Date(s).toISOString() : null
+              run('win',
+                () => adminSetWindows(code, password, {
+                  nominations_open_at:  toIso(nomOpen),
+                  nominations_close_at: toIso(nomClose),
+                  voting_open_at:       toIso(voteOpen),
+                  voting_close_at:      toIso(voteClose),
+                }),
+                null,
+                () => { onSettingsChange?.({
+                  nominations_open_at:  toIso(nomOpen),
+                  nominations_close_at: toIso(nomClose),
+                  voting_open_at:       toIso(voteOpen),
+                  voting_close_at:      toIso(voteClose),
+                }); toast('Schedule saved', 'success') })
+            }}>
+            Save schedule
+          </button>
+          <span className="self-center text-xs font-mono text-faint">
+            Times are in your device's timezone.
+          </span>
         </div>
       </div>
 

@@ -237,6 +237,17 @@ export const adminSetCodeFormat = (code, password, format, length) =>
 export const adminSetWhatsappTemplate = (code, password, template) =>
   rpc('admin_set_whatsapp_template', { p_code: code, p_password: password, p_template: template })
 
+export const adminSetWindows = (code, password, opts = {}) =>
+  rpc('admin_set_windows', {
+    p_code: code, p_password: password,
+    p_nominations_open_at:  opts.nominations_open_at  ?? null,
+    p_nominations_close_at: opts.nominations_close_at ?? null,
+    p_voting_open_at:       opts.voting_open_at       ?? null,
+    p_voting_close_at:      opts.voting_close_at      ?? null,
+    p_clear_nominations:    opts.clear_nominations    ?? false,
+    p_clear_voting:         opts.clear_voting         ?? false,
+  })
+
 export const adminBulkImportVoters = (code, password, rows, generateCodes = true) =>
   rpc('admin_bulk_import_voters', { p_code: code, p_password: password, p_rows: rows, p_generate_codes: generateCodes })
 
