@@ -3,10 +3,11 @@ import { Eyebrow, Spinner } from '../../components/ui'
 import { useToast } from '../../components/Toast'
 import {
   adminGetVoters, adminRegenerateCode, adminSetVoterCode, adminImportVoters,
+  adminBulkImportVoters, subscribeElection,
 } from '../../lib/api'
-import { Copy, Check, RefreshCw, Pencil, Download, Upload } from 'lucide-react'
+import { Copy, Check, RefreshCw, Pencil, Download, Upload, ClipboardPaste, MessageCircle, Mail } from 'lucide-react'
 
-export default function VotersTab({ code, password, settings }) {
+export default function VotersTab({ code, password, settings, electionId, title, whatsappTemplate }) {
   const toast = useToast()
   const [voters, setVoters] = useState([])
   const [loading, setLoading] = useState(true)
@@ -22,6 +23,26 @@ export default function VotersTab({ code, password, settings }) {
     finally { setLoading(false) }
   }, [code, password, toast])
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!electionId) return
+    return subscribeElection('registrations', electionId, () => load())
+  }, [electionId, load])
+
+  const [showBulk, setShowBulk] = useState(false)
+  const [bulkText, setBulkText] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
+
+  async function bulkPaste() {
+    const rows = parsePastedRows(bulkText)
+    if (rows.length === 0) return toast('No rows detected. One person per line, comma or tab separated.', 'error')
+    setBulkBusy(true)
+    try {
+      const res = await adminBulkImportVoters(code, password, rows, true)
+      toast(`Imported ${res.imported} — codes ready`, 'success')
+      setBulkText(''); setShowBulk(false); load()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setBulkBusy(false) }
+  }
 
   const filtered = voters.filter((v) => {
     if (filter === 'voted' && !v.has_voted) return false
@@ -86,6 +107,9 @@ export default function VotersTab({ code, password, settings }) {
           </select>
         </div>
         <div className="flex gap-2">
+          <button className="btn text-sm" onClick={() => setShowBulk((v) => !v)}>
+            <ClipboardPaste size={14} className="inline -mt-1 mr-1" /> Paste list
+          </button>
           <button className="btn text-sm" onClick={exportCsv}>
             <Download size={14} className="inline -mt-1 mr-1" /> Export CSV
           </button>
@@ -95,6 +119,26 @@ export default function VotersTab({ code, password, settings }) {
           </label>
         </div>
       </div>
+
+      {showBulk && (
+        <div className="panel p-4 space-y-2 border-violet">
+          <div className="font-display font-700 uppercase text-sm">Paste a list — one person per line</div>
+          <p className="text-xs text-faint">
+            Columns separated by comma or tab. Use the header row to label columns:
+            <span className="font-mono"> name, email, phone, admission</span> (any subset works).
+            Each row becomes an approved voter with a one-time code generated immediately.
+          </p>
+          <textarea className="input min-h-[140px] font-mono text-sm" value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            placeholder={`name, email, phone, admission\nAlice, a@x.lk, +94771234567, A001\nBilal, b@x.lk, +94777654321, A002`} />
+          <div className="flex gap-2">
+            <button className="btn btn-primary" disabled={bulkBusy} onClick={bulkPaste}>
+              {bulkBusy ? 'Importing…' : 'Import & generate codes'}
+            </button>
+            <button className="btn" onClick={() => setShowBulk(false)} disabled={bulkBusy}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       <p className="eyebrow">{filtered.length} of {voters.length} shown</p>
 
@@ -115,14 +159,24 @@ export default function VotersTab({ code, password, settings }) {
             </div>
 
             {usesCodes && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-lg tracking-widest border-2 border-rule bg-white px-3 py-1">
                   {v.voter_code || <span className="text-faint text-sm">not issued</span>}
                 </span>
                 {v.voter_code && (
-                  <button className="btn px-2 py-2" title="Copy code" onClick={() => copy(v.voter_code, v.id)}>
-                    {copiedId === v.id ? <Check size={15} /> : <Copy size={15} />}
-                  </button>
+                  <>
+                    <button className="btn px-2 py-2" title="Copy code" onClick={() => copy(v.voter_code, v.id)}>
+                      {copiedId === v.id ? <Check size={15} /> : <Copy size={15} />}
+                    </button>
+                    <a className="btn px-2 py-2 text-verify" title="WhatsApp"
+                       href={waLink(v, code, title, whatsappTemplate)} target="_blank" rel="noreferrer">
+                      <MessageCircle size={15} />
+                    </a>
+                    <a className="btn px-2 py-2" title="Email"
+                       href={mailLink(v, code, title)}>
+                      <Mail size={15} />
+                    </a>
+                  </>
                 )}
                 <button className="btn px-2 py-2" title="Regenerate" onClick={() => regen(v.id)}><RefreshCw size={15} /></button>
                 <button className="btn px-2 py-2" title="Override code" onClick={() => override(v.id)}><Pencil size={15} /></button>
@@ -188,4 +242,46 @@ function splitCsvLine(line) {
   }
   out.push(cur)
   return out
+}
+
+// Parse pasted text: header row (name/email/phone/admission), then data rows
+// separated by commas or tabs. Tolerant to mixed delimiters and extra spaces.
+function parsePastedRows(text) {
+  const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+  if (lines.length === 0) return []
+  const splitRow = (l) => l.includes('\t') ? l.split('\t') : l.split(',')
+  const cells0 = splitRow(lines[0]).map((c) => c.trim().toLowerCase())
+  const knownHeaders = ['name', 'email', 'phone', 'whatsapp', 'admission', 'admission_number']
+  const hasHeader = cells0.some((c) => knownHeaders.includes(c))
+  let header = hasHeader ? cells0 : ['name', 'email', 'phone', 'admission_number']
+  // normalise aliases
+  header = header.map((h) => h === 'admission' ? 'admission_number'
+                            : h === 'whatsapp' ? 'phone' : h)
+  const dataLines = hasHeader ? lines.slice(1) : lines
+  return dataLines.map((l) => {
+    const cells = splitRow(l).map((c) => c.trim())
+    const row = {}
+    header.forEach((h, i) => { if (cells[i]) row[h] = cells[i] })
+    return row
+  }).filter((r) => r.name || r.email || r.phone || r.admission_number)
+}
+
+// WhatsApp / email link helpers — same template behaviour as ResponsesTab
+function waLink(v, code, title, template) {
+  const phone = String(v.raw_data?.phone || v.raw_data?.phone_number || v.raw_data?.whatsapp || '')
+    .replace(/[^0-9]/g, '')
+  const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${code}`
+  const msg = (template || 'Hello {name}, your one-time code for {election}: *{code}*. Vote here: {link}')
+    .replaceAll('{name}', v.name || '')
+    .replaceAll('{code}', v.voter_code || '')
+    .replaceAll('{election}', title || '')
+    .replaceAll('{link}', link)
+  const text = encodeURIComponent(msg)
+  return phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`
+}
+function mailLink(v, code, title) {
+  const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${code}`
+  const subj = encodeURIComponent(`Your voting code for ${title || code}`)
+  const body = encodeURIComponent(`Hello ${v.name || ''},\n\nYour one-time voting code is: ${v.voter_code}\n\nVote here: ${link}\n`)
+  return `mailto:${v.email || ''}?subject=${subj}&body=${body}`
 }

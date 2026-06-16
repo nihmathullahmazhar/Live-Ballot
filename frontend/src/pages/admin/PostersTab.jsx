@@ -134,9 +134,23 @@ function CandidatePoster({ c, title }) {
           </div>
           {c.bio && <div style={{ marginTop: 8, fontSize: 13, color: '#3a3a3a', lineHeight: 1.35 }}>{c.bio}</div>}
         </div>
-        <div style={{ marginTop: 14, fontSize: 10, fontFamily: '"IBM Plex Mono", monospace',
-                      color: '#9b9b9b', textAlign: 'center', letterSpacing: 2, textTransform: 'uppercase' }}>
-          Vote at live-ballot.vercel.app
+        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      borderTop: '2px solid #d0d0d0', paddingTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 22, height: 22, background: '#4B2E83', color: '#fff',
+                          display: 'grid', placeItems: 'center', fontFamily: '"IBM Plex Mono", monospace',
+                          fontSize: 9, fontWeight: 700, letterSpacing: 1 }}>NWS</div>
+            <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 9, lineHeight: 1.2 }}>
+              <div style={{ color: '#1a1a1a', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>
+                Powered by NWS
+              </div>
+              <div style={{ color: '#9b9b9b', letterSpacing: 1 }}>nihmathullah.com</div>
+            </div>
+          </div>
+          <div style={{ fontSize: 9, fontFamily: '"IBM Plex Mono", monospace',
+                        color: '#9b9b9b', letterSpacing: 2, textTransform: 'uppercase' }}>
+            live-ballot.vercel.app
+          </div>
         </div>
       </div>
     </div>
@@ -166,11 +180,24 @@ function PositionPoster({ position, title }) {
         <div style={{ marginTop: 22, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 16 }}>
           {approved.map((c) => <Mini key={c.id} c={c} />)}
         </div>
-        <div style={{ position: 'absolute', bottom: 30, left: 30, right: 30, fontSize: 11,
-                      fontFamily: '"IBM Plex Mono", monospace', color: '#9b9b9b',
-                      textAlign: 'center', letterSpacing: 2, textTransform: 'uppercase',
-                      borderTop: '2px solid #d0d0d0', paddingTop: 10 }}>
-          Vote at live-ballot.vercel.app
+        <div style={{ position: 'absolute', bottom: 30, left: 30, right: 30,
+                      borderTop: '2px solid #d0d0d0', paddingTop: 10,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 28, height: 28, background: '#4B2E83', color: '#fff',
+                          display: 'grid', placeItems: 'center', fontFamily: '"IBM Plex Mono", monospace',
+                          fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>NWS</div>
+            <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 10, lineHeight: 1.2 }}>
+              <div style={{ color: '#1a1a1a', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>
+                Powered by NWS Digital Services
+              </div>
+              <div style={{ color: '#9b9b9b', letterSpacing: 1 }}>nihmathullah.com</div>
+            </div>
+          </div>
+          <div style={{ fontSize: 10, fontFamily: '"IBM Plex Mono", monospace',
+                        color: '#9b9b9b', letterSpacing: 2, textTransform: 'uppercase' }}>
+            live-ballot.vercel.app
+          </div>
         </div>
       </div>
     </div>
