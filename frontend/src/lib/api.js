@@ -263,6 +263,9 @@ export const adminBulkImportVoters = (code, password, rows, generateCodes = true
 export const adminPromoteToCandidate = (code, password, responseId, positionId) =>
   rpc('admin_promote_to_candidate', { p_code: code, p_password: password, p_response_id: responseId, p_position_id: positionId })
 
+export const adminLogSession = (code, password, actorName) =>
+  rpc('admin_log_session', { p_code: code, p_password: password, p_actor_name: actorName })
+
 // Subscribe to realtime changes for a given election table.
 // onChange runs on any insert/update/delete. Returns an unsubscribe fn.
 export function subscribeElection(table, electionId, onChange) {
