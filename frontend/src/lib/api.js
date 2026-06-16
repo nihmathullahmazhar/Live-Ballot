@@ -253,13 +253,20 @@ export function subscribeElection(table, electionId, onChange) {
   return () => { try { supabase.removeChannel(channel) } catch (_) {} }
 }
 
-// Resolve a path in a public-ish image bucket to a signed display URL.
-// Tries the public bucket first, falls back to signed.
+// Resolve a path in a storage bucket to a viewable URL.
+// Tries public URL first (works if the bucket is set Public in Supabase Storage).
+// Falls back to a 1-hour signed URL if not.
 export async function imageUrl(bucket, path) {
   if (!path) return null
+  // try public URL
   try {
     const { data } = supabase.storage.from(bucket).getPublicUrl(path)
-    if (data?.publicUrl) return data.publicUrl
+    if (data?.publicUrl) {
+      // verify it actually loads (private buckets return 400 on the URL)
+      const ok = await fetch(data.publicUrl, { method: 'HEAD' }).then((r) => r.ok).catch(() => false)
+      if (ok) return data.publicUrl
+    }
   } catch (_) {}
-  return signedUrl(bucket, path, 600)
+  // fall back to signed URL
+  return signedUrl(bucket, path, 3600)
 }

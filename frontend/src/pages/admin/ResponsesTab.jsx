@@ -7,7 +7,7 @@ import {
 } from '../../lib/api'
 import {
   Trash2, KeyRound, Search, Download, MessageCircle, Mail, Check, X,
-  RefreshCw, Copy, ImageIcon,
+  RefreshCw, Copy, ImageIcon, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { downloadCSV } from '../../lib/csv'
 
@@ -171,6 +171,7 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
 /* ------------ one response card with photo + answers + code ----------- */
 function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemplate, title, toast }) {
   const [photo, setPhoto] = useState(null)
+  const [open, setOpen] = useState(false)
   useEffect(() => {
     if (r.candidate_photo_path) imageUrl('candidate-photos', r.candidate_photo_path).then(setPhoto)
   }, [r.candidate_photo_path])
@@ -185,7 +186,6 @@ function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemp
             <input type="checkbox" className="mt-1" checked={!!sel[r.id]}
               onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} />
           )}
-          {/* candidate photo if any */}
           {r.candidate_photo_path ? (
             <div className="h-14 w-14 border-2 border-rule bg-white overflow-hidden shrink-0">
               {photo
@@ -199,7 +199,9 @@ function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemp
           ) : null}
           <div className="min-w-0">
             <div className="font-display font-700 flex flex-wrap items-center gap-2">
-              {r.name || 'Unnamed'}
+              <button onClick={() => setOpen((v) => !v)} className="hover:text-violet">
+                {r.name || 'Unnamed'}
+              </button>
               {r.voter_code && (
                 <button onClick={() => { navigator.clipboard?.writeText(r.voter_code); toast('Code copied', 'success') }}
                   className="text-xs font-mono px-2 py-0.5 border-2 border-verify text-verify bg-white hover:bg-verify hover:text-white"
@@ -216,10 +218,17 @@ function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemp
               {r.dup_admission && <span className="text-xs font-mono text-ballot">⚑ dup ID</span>}
               <span className={`text-xs font-mono ${r.status === 'converted' ? 'text-verify' : 'text-faint'}`}>· {r.status}</span>
             </div>
-            {r.created_at && <div className="text-xs text-faint font-mono">{new Date(r.created_at).toLocaleString()}</div>}
+            <div className="text-xs text-faint font-mono flex items-center gap-2">
+              {r.created_at && <span>{new Date(r.created_at).toLocaleString()}</span>}
+              {r.email && <span>· {r.email}</span>}
+              {r.admission_number && <span>· #{r.admission_number}</span>}
+            </div>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-start">
+          <button className="btn px-2 py-1 text-sm" onClick={() => setOpen((v) => !v)} title={open ? 'Collapse' : 'Expand'}>
+            {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
           {r.voter_code && (
             <>
               <a className="btn px-2 py-1 text-sm text-verify" href={wa} target="_blank" rel="noreferrer" title="WhatsApp">
@@ -233,23 +242,25 @@ function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemp
               </button>
             </>
           )}
-          <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>View / edit</button>
+          <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>Edit</button>
           <button className="btn btn-danger px-3" onClick={() => del(r.id)}><Trash2 size={15} /></button>
         </div>
       </div>
 
-      <dl className="mt-3 grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-        {answerRows(r, fields).map(({ label, value, isFile }, k) => (
-          <div key={k} className="flex gap-2 border-b border-dashed border-rule/40 py-1">
-            <dt className="text-faint min-w-[8rem] shrink-0">{label}</dt>
-            <dd className="font-600 break-words">
-              {isFile
-                ? <FilePreview path={value} bucket="voter-photos" />
-                : (value || <span className="text-faint font-normal">—</span>)}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      {open && (
+        <dl className="mt-3 grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+          {answerRows(r, fields).map(({ label, value, isFile }, k) => (
+            <div key={k} className="flex gap-2 border-b border-dashed border-rule/40 py-1">
+              <dt className="text-faint min-w-[8rem] shrink-0">{label}</dt>
+              <dd className="font-600 break-words flex-1">
+                {isFile || looksLikeImagePath(value)
+                  ? <FilePreview path={value} bucket="voter-photos" />
+                  : (value || <span className="text-faint font-normal">—</span>)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </div>
   )
 }
@@ -329,6 +340,10 @@ function EditModal({ r, code, password, toast, onClose, onSaved }) {
 }
 
 /* ---- helpers ---- */
+function looksLikeImagePath(v) {
+  if (typeof v !== 'string') return false
+  return /\.(jpe?g|png|gif|webp|heic|bmp)$/i.test(v) && (v.includes('/') || v.length > 20)
+}
 function valOf(r, key) {
   let v = r.answers?.[key]
   if (v === undefined || v === null || v === '') {
