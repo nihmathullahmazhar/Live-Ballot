@@ -5,9 +5,11 @@ import {
   adminGetBallot, adminAddPosition, adminDeletePosition,
   adminAddCandidate, adminDeleteCandidate,
   adminApproveCandidate, adminRejectCandidate,
+  adminUpdatePosition, adminReorderPositions,
   subscribeElection, imageUrl,
 } from '../../lib/api'
-import { Plus, Trash2, Check, X, Download, RefreshCw, ImageIcon } from 'lucide-react'
+import { Plus, Trash2, Check, X, Download, RefreshCw, ImageIcon,
+  ArrowUp, ArrowDown, Pencil } from 'lucide-react'
 import { downloadCSV } from '../../lib/csv'
 
 export default function BallotTab({ code, password, electionId }) {
@@ -18,6 +20,27 @@ export default function BallotTab({ code, password, electionId }) {
   const [pTitle, setPTitle] = useState('')
   const [pSeats, setPSeats] = useState(1)
   const [candDraft, setCandDraft] = useState({}) // positionId -> {name, bio}
+  const [editingPos, setEditingPos] = useState(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editSeats, setEditSeats] = useState(1)
+
+  async function savePos(id) {
+    try {
+      await adminUpdatePosition(code, password, id, editTitle, Number(editSeats) || 1)
+      toast('Position updated', 'success'); setEditingPos(null); load()
+    } catch (e) { toast(e.message, 'error') }
+  }
+
+  async function moveBy(idx, delta) {
+    const next = [...positions]
+    const tgt = idx + delta
+    if (tgt < 0 || tgt >= next.length) return
+    ;[next[idx], next[tgt]] = [next[tgt], next[idx]]
+    setPositions(next) // optimistic
+    try {
+      await adminReorderPositions(code, password, next.map((p) => p.id))
+    } catch (e) { toast(e.message, 'error'); load() }
+  }
 
   async function load() {
     try { setPositions(await adminGetBallot(code, password)) }
@@ -122,18 +145,46 @@ export default function BallotTab({ code, password, electionId }) {
           No positions yet. Add one above when you're ready to set up voting — your form keeps
           collecting registrations and nominations in the meantime.
         </div>
-      ) : positions.map((p) => {
+      ) : positions.map((p, idx) => {
         const d = candDraft[p.id] || { name: '', bio: '' }
+        const isEditing = editingPos === p.id
         return (
           <div key={p.id} className="panel p-4">
             <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="font-display font-800 text-lg uppercase">{p.title}</div>
-                <div className="text-xs text-faint font-mono">{p.max_winners} seat{p.max_winners > 1 ? 's' : ''}</div>
+              <div className="flex-1 min-w-0">
+                {isEditing ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input className="input flex-1 min-w-[10rem]" value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)} />
+                    <label className="text-xs font-mono text-faint flex items-center gap-1">
+                      seats <input className="input w-16" type="number" min={1}
+                        value={editSeats} onChange={(e) => setEditSeats(e.target.value)} />
+                    </label>
+                    <button className="btn btn-primary px-3 text-sm" onClick={() => savePos(p.id)}>Save</button>
+                    <button className="btn px-3 text-sm" onClick={() => setEditingPos(null)}>Cancel</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="font-display font-800 text-lg uppercase">{p.title}</div>
+                    <div className="text-xs text-faint font-mono">{p.max_winners} seat{p.max_winners > 1 ? 's' : ''}</div>
+                  </>
+                )}
               </div>
-              <button className="btn px-2 py-1 text-ballot" title="Delete position" onClick={() => delPosition(p.id)}>
-                <Trash2 size={15} />
-              </button>
+              {!isEditing && (
+                <div className="flex gap-1 shrink-0">
+                  <button className="btn px-2 py-1" title="Move up" disabled={idx === 0}
+                    onClick={() => moveBy(idx, -1)}><ArrowUp size={14} /></button>
+                  <button className="btn px-2 py-1" title="Move down" disabled={idx === positions.length - 1}
+                    onClick={() => moveBy(idx, +1)}><ArrowDown size={14} /></button>
+                  <button className="btn px-2 py-1" title="Edit"
+                    onClick={() => { setEditingPos(p.id); setEditTitle(p.title); setEditSeats(p.max_winners) }}>
+                    <Pencil size={14} />
+                  </button>
+                  <button className="btn px-2 py-1 text-ballot" title="Delete position" onClick={() => delPosition(p.id)}>
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              )}
             </div>
 
             <Rule />
