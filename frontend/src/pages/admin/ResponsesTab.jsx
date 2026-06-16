@@ -62,6 +62,13 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
   })
   const selectedIds = Object.keys(sel).filter((id) => sel[id])
 
+  function selectAllPending() {
+    const next = {}
+    list.forEach((r) => { if (r.status === 'pending') next[r.id] = true })
+    setSel(next)
+  }
+  function clearSel() { setSel({}) }
+
   async function generate() {
     if (selectedIds.length === 0) return toast('Select people first', 'error')
     setBusy(true)
@@ -116,15 +123,18 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
             <option value="duplicates">Duplicates only</option>
           </select>
         </div>
-        <div className="flex gap-2">
-          <button className="btn text-sm" onClick={load} title="Refresh">
-            <RefreshCw size={14} className="inline -mt-1 mr-1" /> Refresh
+        <div className="flex gap-2 flex-wrap">
+          <button className="btn btn-sm" onClick={load} title="Refresh">
+            <RefreshCw size={14} /> Refresh
           </button>
-          <button className="btn text-sm" disabled={list.length === 0} onClick={exportResponses}>
-            <Download size={14} className="inline -mt-1 mr-1" /> Export
+          <button className="btn btn-sm" disabled={list.length === 0} onClick={exportResponses}>
+            <Download size={14} /> Export
           </button>
-          <button className="btn btn-primary" disabled={busy || selectedIds.length === 0} onClick={generate}>
-            <KeyRound size={15} className="inline -mt-1 mr-1" />
+          {selectedIds.length > 0
+            ? <button className="btn btn-sm btn-ghost" onClick={clearSel}>Clear ({selectedIds.length})</button>
+            : <button className="btn btn-sm" onClick={selectAllPending}>Select all pending</button>}
+          <button className="btn btn-sm btn-primary" disabled={busy || selectedIds.length === 0} onClick={generate}>
+            <KeyRound size={15} />
             Generate codes ({selectedIds.length})
           </button>
         </div>
@@ -157,8 +167,8 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
       {view === 'summary' && <Summary rows={list} fields={fields} />}
 
       {view === 'individual' && (
-        <div className="panel divide-y-2 divide-rule/30">
-          {list.length === 0 && <div className="p-6 text-faint text-sm">No responses.</div>}
+        <div className="space-y-2.5">
+          {list.length === 0 && <div className="card p-6 text-faint text-sm">No responses.</div>}
           {list.map((r) => (
             <ResponseCard key={r.id} r={r} fields={fields} code={code} password={password}
               positions={positions}
@@ -199,11 +209,11 @@ function ResponseCard({ r, fields, code, password, positions, sel, setSel, setEd
   }
 
   return (
-    <div className="p-4">
-      <div className="flex flex-wrap items-start gap-3 justify-between">
-        <div className="flex items-start gap-3 min-w-0">
+    <div className="row-card">
+      <div className="flex items-start gap-3 justify-between">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
           {r.status === 'pending' && (
-            <input type="checkbox" className="mt-1" checked={!!sel[r.id]}
+            <input type="checkbox" className="mt-1.5" checked={!!sel[r.id]}
               onChange={(e) => setSel((s) => ({ ...s, [r.id]: e.target.checked }))} />
           )}
           {r.candidate_photo_path ? (
@@ -217,54 +227,54 @@ function ResponseCard({ r, fields, code, password, positions, sel, setSel, setEd
               <ImageIcon size={18} />
             </div>
           ) : null}
-          <div className="min-w-0">
-            <div className="font-display font-700 flex flex-wrap items-center gap-2">
-              <button onClick={() => setOpen((v) => !v)} className="hover:text-violet">
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold flex flex-wrap items-center gap-2">
+              <button onClick={() => setOpen((v) => !v)} className="hover:text-violet text-left">
                 {r.name || 'Unnamed'}
               </button>
               {r.voter_code && (
                 <button onClick={() => { navigator.clipboard?.writeText(r.voter_code); toast('Code copied', 'success') }}
-                  className="text-xs font-mono px-2 py-0.5 border-2 border-verify text-verify bg-white hover:bg-verify hover:text-white"
+                  className="text-xs font-mono px-2 py-0.5 rounded-md border text-verify hover:bg-verify hover:text-white transition"
+                  style={{ borderColor: 'var(--green)' }}
                   title="Click to copy">
                   <KeyRound size={11} className="inline -mt-0.5 mr-1" />{r.voter_code}
                 </button>
               )}
               {r.wants_candidacy && (
-                <span className="text-xs font-mono text-violet">candidate
-                  {r.candidate_positions?.length > 0 && ` · ${r.candidate_positions.join(', ')}`}</span>
+                <span className="pill pill-candidate">candidate{r.candidate_positions?.length > 0 && ` · ${r.candidate_positions.join(', ')}`}</span>
               )}
-              {r.has_voted && <span className="text-xs font-mono text-verify">✓ voted</span>}
-              {r.dup_email && <span className="text-xs font-mono text-ballot">⚑ dup email</span>}
-              {r.dup_admission && <span className="text-xs font-mono text-ballot">⚑ dup ID</span>}
-              <span className={`text-xs font-mono ${r.status === 'converted' ? 'text-verify' : 'text-faint'}`}>· {r.status}</span>
+              {r.has_voted && <span className="pill pill-approved">voted</span>}
+              {r.dup_email && <span className="pill pill-rejected">dup email</span>}
+              {r.dup_admission && <span className="pill pill-rejected">dup ID</span>}
+              <StatusPill status={r.status} />
             </div>
-            <div className="text-xs text-faint font-mono flex items-center gap-2">
+            <div className="text-xs text-faint font-mono flex flex-wrap items-center gap-x-2 mt-0.5">
               {r.created_at && <span>{new Date(r.created_at).toLocaleString()}</span>}
               {r.email && <span>· {r.email}</span>}
               {r.admission_number && <span>· #{r.admission_number}</span>}
             </div>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap items-start">
-          <button className="btn px-2 py-1 text-sm" onClick={() => setOpen((v) => !v)} title={open ? 'Collapse' : 'Expand'}>
-            {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        <div className="action-group items-start shrink-0 flex-nowrap">
+          <button className="icon-btn" onClick={() => setOpen((v) => !v)} title={open ? 'Collapse' : 'Expand'}>
+            {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
           {r.voter_code && (
             <>
-              <a className="btn px-2 py-1 text-sm text-verify" href={wa} target="_blank" rel="noreferrer" title="WhatsApp">
-                <MessageCircle size={14} />
+              <a className="icon-btn icon-btn-green" href={wa} target="_blank" rel="noreferrer" title="Send on WhatsApp">
+                <MessageCircle size={16} />
               </a>
-              <a className="btn px-2 py-1 text-sm" href={mail} title="Email">
-                <Mail size={14} />
+              <a className="icon-btn" href={mail} title="Email code">
+                <Mail size={16} />
               </a>
-              <button className="btn px-2 py-1 text-sm" onClick={() => { navigator.clipboard?.writeText(r.voter_code); toast('Copied', 'success') }} title="Copy code">
-                <Copy size={14} />
+              <button className="icon-btn" onClick={() => { navigator.clipboard?.writeText(r.voter_code); toast('Copied', 'success') }} title="Copy code">
+                <Copy size={16} />
               </button>
             </>
           )}
           <div className="relative">
-            <button className="btn px-2 py-1 text-sm text-violet" onClick={() => setShowPick((v) => !v)} title="Make candidate">
-              <UserPlus size={14} />
+            <button className="icon-btn icon-btn-violet" onClick={() => setShowPick((v) => !v)} title="Make candidate">
+              <UserPlus size={16} />
             </button>
             {showPick && (
               <div className="absolute right-0 top-full mt-1 z-10 bg-paper border-4 border-ink min-w-[14rem] max-h-60 overflow-auto shadow-paper">
@@ -282,7 +292,7 @@ function ResponseCard({ r, fields, code, password, positions, sel, setSel, setEd
             )}
           </div>
           <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>Edit</button>
-          <button className="btn btn-danger px-3" onClick={() => del(r.id)}><Trash2 size={15} /></button>
+          <button className="icon-btn icon-btn-danger" onClick={() => del(r.id)} title="Delete"><Trash2 size={16} /></button>
         </div>
       </div>
 
@@ -489,4 +499,11 @@ function ChoiceBars({ rows, field, options }) {
       {blank > 0 && <div className="text-xs text-faint mt-1">No answer: {blank}</div>}
     </div>
   )
+}
+
+function StatusPill({ status }) {
+  const cls = status === 'approved' ? 'pill-approved'
+    : status === 'rejected' ? 'pill-rejected'
+    : status === 'converted' ? 'pill-converted' : 'pill-pending'
+  return <span className={`pill ${cls}`}>{status || 'pending'}</span>
 }

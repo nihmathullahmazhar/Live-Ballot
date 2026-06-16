@@ -63,7 +63,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
     <div className="space-y-5">
       {/* Sharing & access */}
       <div className="panel p-6">
-        <Eyebrow>Sharing &amp; access</Eyebrow>
+        <h3 className="font-semibold text-base">Sharing &amp; access</h3>
         <p className="text-sm text-ink/70 mt-1">
           You manage this election from your dashboard whenever you're logged in — no password.
           A <b>sharing password</b> is optional: set one to let someone <i>without an account</i>
@@ -100,7 +100,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
           Status: {hasPw ? 'sharing password is set' : 'no sharing password — owner-only'}
         </p>
         {hasPw && (
-          <div className="mt-3 border-2 border-dashed border-rule p-3 bg-white">
+          <div className="mt-3 rounded-lg border border-dashed border-[var(--line-2)] p-3 bg-white">
             <div className="font-display font-700 uppercase text-xs">Helper access link</div>
             <p className="text-xs text-faint mt-1">Send this link + the sharing password to your helper. No account needed.</p>
             <div className="mt-2 flex gap-2">
@@ -113,7 +113,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Post-vote message */}
       <div className="panel p-6">
-        <Eyebrow>Message after voting</Eyebrow>
+        <h3 className="font-semibold text-base">Message after voting</h3>
         <p className="text-sm text-ink/70 mt-1">
           Shown to each voter right after they cast their vote — a thank-you, when results go live, etc.
           Leave blank for none.
@@ -132,7 +132,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Election schedule (nominations + voting windows) */}
       <div className="panel p-6">
-        <Eyebrow>Election schedule</Eyebrow>
+        <h3 className="font-semibold text-base">Election schedule</h3>
         <p className="text-sm text-ink/70 mt-1">
           Optional. If you set a nominations window, self-nominations are accepted only inside it.
           If you set a voting window, voting opens automatically when it starts and closes when it ends.
@@ -214,7 +214,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Voter-code format */}
       <div className="panel p-6">
-        <Eyebrow>Voter-code format</Eyebrow>
+        <h3 className="font-semibold text-base">Voter-code format</h3>
         <p className="text-sm text-ink/70 mt-1">
           How the one-time codes look. You can change this any time before voting starts;
           codes already issued stay the same.
@@ -245,7 +245,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Max positions a nominee can stand for */}
       <div className="panel p-6">
-        <Eyebrow>Self-nomination limit</Eyebrow>
+        <h3 className="font-semibold text-base">Self-nomination limit</h3>
         <p className="text-sm text-ink/70 mt-1">
           The maximum number of positions one person can stand for in this election.
         </p>
@@ -267,7 +267,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* WhatsApp / email message template */}
       <div className="panel p-6">
-        <Eyebrow>WhatsApp message template</Eyebrow>
+        <h3 className="font-semibold text-base">WhatsApp message template</h3>
         <p className="text-sm text-ink/70 mt-1">
           Used when you tap the WhatsApp button next to a voter in Responses. Placeholders get
           filled in automatically:
@@ -291,7 +291,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Google Sheets live sync */}
       <div className="panel p-6">
-        <Eyebrow>Google Sheets sync</Eyebrow>
+        <h3 className="font-semibold text-base">Google Sheets sync</h3>
         <p className="text-sm text-ink/70 mt-1">
           Mirror this election into a Google Sheet that updates automatically every few minutes — responses,
           voters, candidates, live vote counts. Free, no third-party service.
@@ -318,7 +318,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
               <SyncRow label="Anon key" value={supabaseAnonKey} secret />
             </div>
 
-            <details className="mt-4 border-2 border-rule bg-white/40 p-3">
+            <details className="mt-4 rounded-lg p-3 bg-paper2 border border-[var(--line)] p-3">
               <summary className="font-display font-700 uppercase text-sm cursor-pointer">
                 Setup steps (Google Sheets · 5 min, one-time)
               </summary>
@@ -352,7 +352,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Finalization gate */}
       <div className="panel p-6">
-        <Eyebrow>Finalization (the voting gate)</Eyebrow>
+        <h3 className="font-semibold text-base">Finalization (the voting gate)</h3>
         <p className="text-sm text-ink/70 mt-1">
           Voting cannot open until you finalize. Finalize only after you’ve issued
           codes and approved candidates. You can re-open if you finalized too early.
@@ -378,9 +378,9 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Live run controls */}
       <div className="panel p-6">
-        <Eyebrow>During the run</Eyebrow>
+        <h3 className="font-semibold text-base">During the run</h3>
         <div className="mt-3 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-2 border-rule bg-white/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-paper2 border border-[var(--line)] p-4">
             <div className="max-w-md">
               <div className="font-display font-700 uppercase text-sm">Pause voting</div>
               <div className="text-sm text-ink/70">Temporarily stop votes without closing. Voters see “voting is paused.”</div>
@@ -391,7 +391,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
               {paused ? 'Resume voting' : 'Pause voting'}
             </button>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-2 border-rule bg-white/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-paper2 border border-[var(--line)] p-4">
             <div className="max-w-md">
               <div className="font-display font-700 uppercase text-sm">Registration form</div>
               <div className="text-sm text-ink/70">
@@ -409,7 +409,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Results visibility mode */}
       <div className="panel p-6">
-        <Eyebrow>Results visibility</Eyebrow>
+        <h3 className="font-semibold text-base">Results visibility</h3>
         <p className="text-sm text-ink/70 mt-1">
           <b>Hidden</b>: nobody sees results until you publish. <b>Live</b>: counts
           are public during voting. <b>Admin only</b>: only this panel sees them.
@@ -428,7 +428,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Results publish (used by hidden mode) */}
       <div className="panel p-6">
-        <Eyebrow>Publish results</Eyebrow>
+        <h3 className="font-semibold text-base">Publish results</h3>
         <p className="text-sm text-ink/70 mt-1">
           For <b>hidden</b> mode: release the <Link to={`/e/${code}/results`} className="underline">results page</Link> when ready.
           (Live mode is already public; admin-only never is.)
@@ -452,7 +452,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
       {/* Maintenance */}
       <div className="panel p-6">
-        <Eyebrow>Maintenance</Eyebrow>
+        <h3 className="font-semibold text-base">Maintenance</h3>
         <div className="mt-3 space-y-3">
           <Row title="Reset all votes"
             desc="Deletes every vote and lets registered voters vote again. Registrations and codes stay.">
@@ -476,8 +476,8 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Danger */}
-      <div className="panel p-6 border-ballot">
-        <Eyebrow className="text-ballot">Danger zone</Eyebrow>
+      <div className="panel p-6">
+        <h3 className="font-semibold text-base" style={{color:"var(--red)"}}>Danger zone</h3>
         <Rule />
         <Row title="Delete this election"
           desc="Permanently removes the election and everything in it. No recovery.">
@@ -495,7 +495,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
 function Row({ title, desc, children }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-2 border-rule bg-white/50 p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-paper2 border border-[var(--line)] p-4">
       <div className="max-w-md">
         <div className="font-display font-700 uppercase text-sm">{title}</div>
         <div className="text-sm text-ink/70">{desc}</div>

@@ -3,9 +3,9 @@ import { Eyebrow, Spinner } from '../../components/ui'
 import { useToast } from '../../components/Toast'
 import {
   adminGetVoters, adminRegenerateCode, adminSetVoterCode, adminImportVoters,
-  adminBulkImportVoters, subscribeElection,
+  adminBulkImportVoters, adminDeleteVoter, subscribeElection,
 } from '../../lib/api'
-import { Copy, Check, RefreshCw, Pencil, Download, Upload, ClipboardPaste, MessageCircle, Mail } from 'lucide-react'
+import { Copy, Check, RefreshCw, Pencil, Download, Upload, ClipboardPaste, MessageCircle, Mail, Trash2 } from 'lucide-react'
 
 export default function VotersTab({ code, password, settings, electionId, title, whatsappTemplate }) {
   const toast = useToast()
@@ -68,6 +68,11 @@ export default function VotersTab({ code, password, settings, electionId, title,
     const nc = prompt('Enter the new code for this voter:')
     if (!nc) return
     try { await adminSetVoterCode(code, password, id, nc.trim()); toast('Code updated', 'success'); load() }
+    catch (e) { toast(e.message, 'error') }
+  }
+  async function del(v) {
+    if (!confirm(`Delete voter "${v.name || v.email || v.voter_code}"? This cannot be undone.`)) return
+    try { await adminDeleteVoter(code, password, v.id); toast('Voter deleted', 'success'); load() }
     catch (e) { toast(e.message, 'error') }
   }
 
@@ -142,44 +147,49 @@ export default function VotersTab({ code, password, settings, electionId, title,
 
       <p className="eyebrow">{filtered.length} of {voters.length} shown</p>
 
-      <div className="panel divide-y-2 divide-rule/30">
+      <div className="space-y-3">
+        {filtered.length === 0 && (
+          <div className="panel p-8 text-center text-faint">No voters match.</div>
+        )}
         {filtered.length === 0 && <div className="p-6 text-faint text-sm">No voters match.</div>}
         {filtered.map((v) => (
-          <div key={v.id} className="p-4 flex flex-wrap items-center gap-3 justify-between">
+          <div key={v.id} className="row-card flex flex-wrap items-center gap-3 justify-between">
             <div className="min-w-0">
-              <div className="font-display font-700">
+              <div className="font-display font-700 flex items-center gap-2 flex-wrap">
                 {v.name || <span className="text-faint">Unnamed</span>}
-                <StatusDot status={v.status} />
-                {v.has_voted && <span className="ml-2 text-xs font-mono text-violet">voted</span>}
-                {v.duplicate_selfie && <span className="ml-2 text-xs font-mono text-ballot">⚑ dup selfie</span>}
+                <StatusPill status={v.status} />
+                {v.has_voted && <span className="pill pill-converted">voted</span>}
+                {v.duplicate_selfie && <span className="pill pill-rejected">⚑ dup selfie</span>}
               </div>
-              <div className="text-sm text-faint font-mono truncate">
+              <div className="text-sm text-faint font-mono truncate mt-0.5">
                 {v.email}{v.admission_number ? ` · #${v.admission_number}` : ''}{v.grade ? ` · ${v.grade}` : ''}
               </div>
             </div>
 
             {usesCodes && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-lg tracking-widest border-2 border-rule bg-white px-3 py-1">
-                  {v.voter_code || <span className="text-faint text-sm">not issued</span>}
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="code-chip">
+                  {v.voter_code || <span className="text-faint text-sm tracking-normal">not issued</span>}
                 </span>
-                {v.voter_code && (
-                  <>
-                    <button className="btn px-2 py-2" title="Copy code" onClick={() => copy(v.voter_code, v.id)}>
-                      {copiedId === v.id ? <Check size={15} /> : <Copy size={15} />}
-                    </button>
-                    <a className="btn px-2 py-2 text-verify" title="WhatsApp"
-                       href={waLink(v, code, title, whatsappTemplate)} target="_blank" rel="noreferrer">
-                      <MessageCircle size={15} />
-                    </a>
-                    <a className="btn px-2 py-2" title="Email"
-                       href={mailLink(v, code, title)}>
-                      <Mail size={15} />
-                    </a>
-                  </>
-                )}
-                <button className="btn px-2 py-2" title="Regenerate" onClick={() => regen(v.id)}><RefreshCw size={15} /></button>
-                <button className="btn px-2 py-2" title="Override code" onClick={() => override(v.id)}><Pencil size={15} /></button>
+                <div className="action-group">
+                  {v.voter_code && (
+                    <>
+                      <button className="icon-btn" title="Copy code" onClick={() => copy(v.voter_code, v.id)}>
+                        {copiedId === v.id ? <Check size={16} /> : <Copy size={16} />}
+                      </button>
+                      <a className="icon-btn icon-btn-green" title="Send on WhatsApp"
+                         href={waLink(v, code, title, whatsappTemplate)} target="_blank" rel="noreferrer">
+                        <MessageCircle size={16} />
+                      </a>
+                      <a className="icon-btn" title="Email code" href={mailLink(v, code, title)}>
+                        <Mail size={16} />
+                      </a>
+                    </>
+                  )}
+                  <button className="icon-btn" title="Regenerate code" onClick={() => regen(v.id)}><RefreshCw size={16} /></button>
+                  <button className="icon-btn" title="Set custom code" onClick={() => override(v.id)}><Pencil size={16} /></button>
+                  <button className="icon-btn icon-btn-danger" title="Delete voter" onClick={() => del(v)}><Trash2 size={16} /></button>
+                </div>
               </div>
             )}
           </div>
@@ -197,6 +207,13 @@ export default function VotersTab({ code, password, settings, electionId, title,
 function StatusDot({ status }) {
   const c = status === 'approved' ? 'text-verify' : status === 'rejected' ? 'text-ballot' : 'text-faint'
   return <span className={`ml-2 text-xs font-mono ${c}`}>· {status}</span>
+}
+
+function StatusPill({ status }) {
+  const cls = status === 'approved' ? 'pill-approved'
+    : status === 'rejected' ? 'pill-rejected'
+    : status === 'converted' ? 'pill-converted' : 'pill-pending'
+  return <span className={`pill ${cls}`}>{status || 'pending'}</span>
 }
 
 /* ---- CSV helpers ---- */

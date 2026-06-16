@@ -4,22 +4,31 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink:    '#16161D',   // near-black official ink
-        paper:  '#FAF6EC',   // ballot-paper cream
-        paper2: '#F1EADA',   // slightly deeper paper for panels
-        violet: '#4B2E83',   // official violet (headers/seals)
-        ballot: '#C8102E',   // ballot red (X marks, danger)
-        verify: '#1B7B3A',   // verified green
-        rule:   '#2A2A33',   // rule lines
-        faint:  '#9A9384',    // muted captions on paper
+        // remapped to the new SaaS palette (keeps old class names working)
+        ink:    '#1A1A22',
+        paper:  '#FFFFFF',   // was cream; now card white
+        paper2: '#FBFBFD',
+        violet: '#5B34C4',
+        ballot: '#D33A4B',
+        verify: '#16915A',
+        rule:   '#E7E7EC',   // now hairline grey, not near-black
+        faint:  '#9A9AA6',
+        muted:  '#6B6B78',
+        bg:     '#F7F7F9',
       },
       fontFamily: {
         display: ['Archivo', 'system-ui', 'sans-serif'],
         body:    ['"Public Sans"', 'system-ui', 'sans-serif'],
         mono:    ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
       },
+      borderRadius: {
+        DEFAULT: '10px',
+        lg: '14px',
+        xl: '18px',
+      },
       boxShadow: {
-        paper: '0 1px 0 #00000010, 0 12px 30px -18px #00000040',
+        paper: '0 1px 3px #0000000a',
+        soft:  '0 4px 16px -6px #0000001f',
       },
     },
   },
