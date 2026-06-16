@@ -4,10 +4,11 @@ import { useToast } from '../../components/Toast'
 import {
   adminGetResponses, adminDeleteResponse, adminGenerateCodes, adminUpdateResponse,
   getFormFields, subscribeElection, imageUrl,
+  adminGetBallot, adminPromoteToCandidate,
 } from '../../lib/api'
 import {
   Trash2, KeyRound, Search, Download, MessageCircle, Mail, Check, X,
-  RefreshCw, Copy, ImageIcon, ChevronDown, ChevronUp,
+  RefreshCw, Copy, ImageIcon, ChevronDown, ChevronUp, UserPlus,
 } from 'lucide-react'
 import { downloadCSV } from '../../lib/csv'
 
@@ -23,17 +24,20 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
   const [edit, setEdit] = useState(null)
   const [fields, setFields] = useState([])
   const [view, setView] = useState('individual')
+  const [positions, setPositions] = useState([])
   const liveRef = useRef(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [resp, ff] = await Promise.all([
+      const [resp, ff, bal] = await Promise.all([
         adminGetResponses(code, password),
         getFormFields(code).catch(() => null),
+        adminGetBallot(code, password).catch(() => []),
       ])
       setRows(resp)
       setFields((ff?.fields || []).filter((f) => f.section === 'voter'))
+      setPositions(bal || [])
     } catch (e) { toast(e.message, 'error') }
     finally { setLoading(false) }
   }, [code, password, toast])
@@ -49,7 +53,9 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
   }, [electionId, load])
 
   const list = rows.filter((r) => {
-    if (filter !== 'all' && r.status !== filter) return false
+    if (filter === 'duplicates') {
+      if (!r.dup_email && !r.dup_admission) return false
+    } else if (filter !== 'all' && r.status !== filter) return false
     if (!q.trim()) return true
     const hay = `${r.name || ''} ${r.email || ''} ${r.admission_number || ''} ${r.voter_code || ''}`.toLowerCase()
     return hay.includes(q.toLowerCase())
@@ -107,6 +113,7 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
             <option value="all">All</option>
             <option value="pending">Pending</option>
             <option value="converted">Code issued</option>
+            <option value="duplicates">Duplicates only</option>
           </select>
         </div>
         <div className="flex gap-2">
@@ -153,9 +160,10 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
         <div className="panel divide-y-2 divide-rule/30">
           {list.length === 0 && <div className="p-6 text-faint text-sm">No responses.</div>}
           {list.map((r) => (
-            <ResponseCard key={r.id} r={r} fields={fields} code={code}
+            <ResponseCard key={r.id} r={r} fields={fields} code={code} password={password}
+              positions={positions}
               sel={sel} setSel={setSel} setEdit={setEdit} del={del}
-              whatsappTemplate={whatsappTemplate} title={title} toast={toast} />
+              whatsappTemplate={whatsappTemplate} title={title} toast={toast} onChange={load} />
           ))}
         </div>
       )}
@@ -169,14 +177,26 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
 }
 
 /* ------------ one response card with photo + answers + code ----------- */
-function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemplate, title, toast }) {
+function ResponseCard({ r, fields, code, password, positions, sel, setSel, setEdit, del,
+                       whatsappTemplate, title, toast, onChange }) {
   const [photo, setPhoto] = useState(null)
   const [open, setOpen] = useState(false)
+  const [showPick, setShowPick] = useState(false)
+  const [promoting, setPromoting] = useState(false)
   useEffect(() => {
     if (r.candidate_photo_path) imageUrl('candidate-photos', r.candidate_photo_path).then(setPhoto)
   }, [r.candidate_photo_path])
   const wa = waLink(r, code, title, whatsappTemplate)
   const mail = mailLink(r, code, title)
+
+  async function promote(positionId) {
+    setPromoting(true)
+    try {
+      await adminPromoteToCandidate(code, password, r.id, positionId)
+      toast('Added as candidate', 'success'); setShowPick(false); onChange?.()
+    } catch (e) { toast(e.message, 'error') }
+    finally { setPromoting(false) }
+  }
 
   return (
     <div className="p-4">
@@ -242,6 +262,25 @@ function ResponseCard({ r, fields, code, sel, setSel, setEdit, del, whatsappTemp
               </button>
             </>
           )}
+          <div className="relative">
+            <button className="btn px-2 py-1 text-sm text-violet" onClick={() => setShowPick((v) => !v)} title="Make candidate">
+              <UserPlus size={14} />
+            </button>
+            {showPick && (
+              <div className="absolute right-0 top-full mt-1 z-10 bg-paper border-4 border-ink min-w-[14rem] max-h-60 overflow-auto shadow-paper">
+                <div className="px-3 py-2 text-xs font-mono text-faint border-b border-rule">Add to position…</div>
+                {positions.length === 0 && <div className="px-3 py-2 text-sm text-faint">No positions yet — add some in Ballot tab.</div>}
+                {positions.map((p) => (
+                  <button key={p.id} className="block w-full text-left px-3 py-2 hover:bg-paper2 text-sm"
+                    disabled={promoting} onClick={() => promote(p.id)}>
+                    {p.title}
+                  </button>
+                ))}
+                <button className="block w-full text-left px-3 py-2 hover:bg-paper2 text-xs text-faint border-t border-rule"
+                  onClick={() => setShowPick(false)}>Cancel</button>
+              </div>
+            )}
+          </div>
           <button className="btn px-3 text-sm" onClick={() => setEdit(r)}>Edit</button>
           <button className="btn btn-danger px-3" onClick={() => del(r.id)}><Trash2 size={15} /></button>
         </div>

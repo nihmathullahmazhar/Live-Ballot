@@ -153,6 +153,9 @@ export const adminGetBallot = (code, password) =>
 export const adminAddPosition = (code, password, title, maxWinners) =>
   rpc('admin_add_position', { p_code: code, p_password: password, p_title: title, p_max_winners: maxWinners })
 
+export const adminReorderPositions = (code, password, orderedIds) =>
+  rpc('admin_reorder_positions', { p_code: code, p_password: password, p_ordered_ids: orderedIds })
+
 export const adminUpdatePosition = (code, password, positionId, title, maxWinners) =>
   rpc('admin_update_position', { p_code: code, p_password: password, p_position_id: positionId, p_title: title, p_max_winners: maxWinners })
 
@@ -256,6 +259,9 @@ export const adminRotateSyncToken = (code, password) =>
 
 export const adminBulkImportVoters = (code, password, rows, generateCodes = true) =>
   rpc('admin_bulk_import_voters', { p_code: code, p_password: password, p_rows: rows, p_generate_codes: generateCodes })
+
+export const adminPromoteToCandidate = (code, password, responseId, positionId) =>
+  rpc('admin_promote_to_candidate', { p_code: code, p_password: password, p_response_id: responseId, p_position_id: positionId })
 
 // Subscribe to realtime changes for a given election table.
 // onChange runs on any insert/update/delete. Returns an unsubscribe fn.
