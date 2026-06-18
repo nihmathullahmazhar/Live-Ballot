@@ -32,6 +32,31 @@ export default function VotersTab({ code, password, settings, electionId, title,
   const [bulkText, setBulkText] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
 
+  // guided WhatsApp send-all: opens each voter's chat one at a time
+  const [sendAll, setSendAll] = useState({ active: false, queue: [], idx: 0 })
+
+  function startSendAll() {
+    const queue = voters.filter((v) =>
+      v.voter_code &&
+      (v.raw_data?.phone || v.raw_data?.phone_number || v.raw_data?.whatsapp))
+    if (queue.length === 0) { toast('No voters with a phone number and code', 'error'); return }
+    setSendAll({ active: true, queue, idx: 0 })
+  }
+  function sendCurrent() {
+    const v = sendAll.queue[sendAll.idx]
+    if (v) window.open(waLink(v, code, title, whatsappTemplate), '_blank')
+    advanceSend()
+  }
+  function skipSend() { advanceSend() }
+  function advanceSend() {
+    setSendAll((s) => {
+      const next = s.idx + 1
+      if (next >= s.queue.length) { toast('Reached the end of the list', 'success'); return { active: false, queue: [], idx: 0 } }
+      return { ...s, idx: next }
+    })
+  }
+  function cancelSendAll() { setSendAll({ active: false, queue: [], idx: 0 }) }
+
   async function bulkPaste() {
     const rows = parsePastedRows(bulkText)
     if (rows.length === 0) return toast('No rows detected. One person per line, comma or tab separated.', 'error')
@@ -121,6 +146,9 @@ export default function VotersTab({ code, password, settings, electionId, title,
           </select>
         </div>
         <div className="flex gap-2">
+          <button className="btn btn-primary text-sm" onClick={startSendAll} title="Open each voter's WhatsApp with their code pre-filled, one at a time">
+            <MessageCircle size={14} className="inline -mt-1 mr-1" /> Send all on WhatsApp
+          </button>
           <button className="btn text-sm" onClick={() => setShowBulk((v) => !v)}>
             <ClipboardPaste size={14} className="inline -mt-1 mr-1" /> Paste list
           </button>
@@ -133,6 +161,32 @@ export default function VotersTab({ code, password, settings, electionId, title,
           </label>
         </div>
       </div>
+
+      {sendAll.active && (
+        <div className="card p-5 vb-fade" style={{ borderColor: 'var(--violet)' }}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-bold uppercase text-sm" style={{ color: 'var(--violet)' }}>
+                Guided WhatsApp send · {sendAll.idx + 1} of {sendAll.queue.length}
+              </div>
+              <p className="text-sm text-muted mt-1">
+                Sending to: <b>{sendAll.queue[sendAll.idx]?.name || sendAll.queue[sendAll.idx]?.voter_code}</b>
+                {' '}({sendAll.queue[sendAll.idx]?.raw_data?.phone || sendAll.queue[sendAll.idx]?.raw_data?.whatsapp || 'no number'})
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn" onClick={skipSend}>Skip</button>
+              <button className="btn btn-primary" onClick={sendCurrent}>
+                Open WhatsApp & next →
+              </button>
+              <button className="btn btn-ghost" onClick={cancelSendAll}>Stop</button>
+            </div>
+          </div>
+          <p className="text-xs text-faint mt-3">
+            Tip: WhatsApp opens with the message pre-filled — just tap send, come back, and hit "Open WhatsApp & next" for the following voter. Voters with no phone number are skipped automatically.
+          </p>
+        </div>
+      )}
 
       {showBulk && (
         <div className="panel p-4 space-y-2 border-violet">

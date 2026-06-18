@@ -271,6 +271,80 @@ body {
   }
   .vb-ring { animation: vbRingIn .5s cubic-bezier(.34,1.56,.64,1); }
   .vb-bigcheck { animation: vbCheckIn .6s cubic-bezier(.34,1.56,.64,1) .1s both; }
+
+  /* candidate card */
+  .vb-cand {
+    position: relative;
+    padding: 0.85rem 1rem;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background:
+      radial-gradient(120% 120% at 0% 0%, rgba(110,69,222,.05), transparent 55%),
+      linear-gradient(180deg, #ffffff, #fbf9f3);
+    overflow: hidden;
+  }
+  .vb-cand::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: linear-gradient(180deg, var(--violet), #9b7bf0);
+    opacity: 0; transition: opacity .18s ease;
+  }
+  .vb-cand:hover::before { opacity: .45; }
+  .vb-cand-selected::before { opacity: 1; }
+  .vb-cand-selected {
+    border-color: transparent;
+    background:
+      radial-gradient(120% 120% at 0% 0%, rgba(110,69,222,.14), transparent 60%),
+      linear-gradient(180deg, #ffffff, var(--violet-bg));
+  }
+
+  /* photo with gradient ring */
+  .vb-cand-photo {
+    width: 60px; height: 60px; border-radius: 14px; padding: 2.5px;
+    background: linear-gradient(135deg, var(--violet), #9b7bf0 60%, #E8C766);
+    display: inline-block;
+  }
+  .vb-cand-photo-inner {
+    display: block; width: 100%; height: 100%; border-radius: 11px; overflow: hidden;
+    background: var(--surface-2); display: grid; place-items: center;
+  }
+  .vb-cand-initials {
+    font-weight: 800; font-size: 1.1rem; color: var(--violet);
+    font-family: 'Archivo', sans-serif;
+  }
+  .vb-cand-check {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center;
+    transition: background .18s ease, border-color .18s ease, transform .18s ease;
+  }
+  .vb-cand:hover .vb-cand-check { transform: scale(1.06); }
+
+  /* live turnout bar */
+  .vb-turnout-track {
+    height: 10px; border-radius: 999px; overflow: hidden;
+    background: var(--surface-2); border: 1px solid var(--line);
+  }
+  .vb-turnout-fill {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--violet), #9b7bf0 60%, #16915A);
+    background-size: 200% 100%;
+    transition: width .6s cubic-bezier(.22,.61,.36,1);
+    animation: vbSheen 4s linear infinite;
+  }
+
+  /* results bar-race */
+  .vb-res-track {
+    height: 14px; border-radius: 999px; overflow: hidden;
+    background: var(--surface-2); border: 1px solid var(--line);
+  }
+  .vb-res-fill {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--line-2), #c9bfa6);
+    transition: width .9s cubic-bezier(.22,.61,.36,1);
+  }
+  .vb-res-win {
+    background: linear-gradient(90deg, var(--violet), #9b7bf0);
+    box-shadow: 0 0 14px -2px rgba(91,52,196,.5);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

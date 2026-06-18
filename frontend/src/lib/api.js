@@ -19,6 +19,9 @@ export const getElectionPublic = (code) =>
 export const getTurnout = (code) =>
   rpc('get_turnout', { p_code: code })
 
+export const getTurnoutPublic = (code) =>
+  rpc('get_turnout_public', { p_code: code })
+
 export const getMyElections = () =>
   rpc('get_my_elections', {})
 
@@ -234,12 +237,27 @@ export async function signedUrl(bucket, path, seconds = 120) {
 // apikey header — this avoids the browser image-CORS problem that blanks <img>
 // exports (a plain <img> displays fine, but fetch()/canvas on it can be blocked).
 const _dataUrlCache = new Map()
-export async function downloadAsDataUrl(bucket, path) {
-  if (!path) return null
+export async function downloadAsDataUrl(bucket, rawPath) {
+  if (!rawPath) return null
+  // normalize: strip a full URL, a leading slash, or a duplicated bucket prefix
+  let path = String(rawPath)
+  const marker = `/object/public/${bucket}/`
+  if (path.includes(marker)) path = path.split(marker)[1]
+  else if (path.includes(`/${bucket}/`)) path = path.split(`/${bucket}/`)[1]
+  path = path.replace(/^\/+/, '')
+  if (path.startsWith(`${bucket}/`)) path = path.slice(bucket.length + 1)
+  path = path.split('?')[0]
+
   const key = `${bucket}/${path}`
   if (_dataUrlCache.has(key)) return _dataUrlCache.get(key)
   const { data, error } = await supabase.storage.from(bucket).download(path)
-  if (error || !data) return null
+  if (error || !data) {
+    const msg = error?.message || 'no data'
+    console.warn('[poster] download failed for', bucket, path, '→', msg)
+    const e = new Error(`download ${path}: ${msg}`)
+    e._posterDownload = true
+    throw e
+  }
   const dataUrl = await new Promise((resolve, reject) => {
     const r = new FileReader()
     r.onloadend = () => resolve(r.result)
@@ -332,3 +350,4 @@ export async function imageUrl(bucket, path) {
   } catch (_) {}
   return signedUrl(bucket, path, 3600)
 }
+
