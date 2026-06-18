@@ -60,11 +60,20 @@ export default function VotersTab({ code, password, settings, electionId, title,
     setCopiedId(id); setTimeout(() => setCopiedId(''), 1200)
   }
 
-  async function regen(id) {
+  async function regen(id, v) {
+    if (v?.has_voted && !confirm(
+      `⚠️ "${v.name || 'This voter'}" has ALREADY VOTED.\n\n` +
+      `Generating a new code does NOT let them vote again — their vote is already counted ` +
+      `and the system blocks a second vote.\n\nAre you sure you want a new code anyway?`
+    )) return
     try { const r = await adminRegenerateCode(code, password, id); toast(`New code: ${r.voter_code}`, 'success'); load() }
     catch (e) { toast(e.message, 'error') }
   }
-  async function override(id) {
+  async function override(id, v) {
+    if (v?.has_voted && !confirm(
+      `⚠️ "${v.name || 'This voter'}" has ALREADY VOTED.\n\n` +
+      `Setting a new code does NOT let them vote again — their vote is already counted.\n\nContinue anyway?`
+    )) return
     const nc = prompt('Enter the new code for this voter:')
     if (!nc) return
     try { await adminSetVoterCode(code, password, id, nc.trim()); toast('Code updated', 'success'); load() }
@@ -145,7 +154,13 @@ export default function VotersTab({ code, password, settings, electionId, title,
         </div>
       )}
 
-      <p className="eyebrow">{filtered.length} of {voters.length} shown</p>
+      <p className="eyebrow">
+        {filtered.length} of {voters.length} shown
+        <span className="mx-2">·</span>
+        <span style={{ color: 'var(--red)' }}>{voters.filter((v) => v.has_voted).length} voted</span>
+        <span className="mx-1">/</span>
+        <span style={{ color: 'var(--green)' }}>{voters.filter((v) => !v.has_voted).length} not voted</span>
+      </p>
 
       <div className="space-y-3">
         {filtered.length === 0 && (
@@ -153,12 +168,18 @@ export default function VotersTab({ code, password, settings, electionId, title,
         )}
         {filtered.length === 0 && <div className="p-6 text-faint text-sm">No voters match.</div>}
         {filtered.map((v) => (
-          <div key={v.id} className="row-card flex flex-wrap items-center gap-3 justify-between">
+          <div key={v.id}
+            className="row-card flex flex-wrap items-center gap-3 justify-between"
+            style={v.has_voted ? { background: 'var(--red-bg)', borderColor: '#f0c2c8' } : undefined}>
             <div className="min-w-0">
               <div className="font-display font-700 flex items-center gap-2 flex-wrap">
-                {v.name || <span className="text-faint">Unnamed</span>}
+                <span style={v.has_voted ? { color: 'var(--red)', textDecoration: 'line-through', textDecorationThickness: '2px' } : undefined}>
+                  {v.name || <span className="text-faint">Unnamed</span>}
+                </span>
+                {v.has_voted
+                  ? <span className="pill pill-rejected" style={{ fontWeight: 800 }}>✓ VOTED</span>
+                  : <span className="pill pill-approved">not voted</span>}
                 <StatusPill status={v.status} />
-                {v.has_voted && <span className="pill pill-converted">voted</span>}
                 {v.duplicate_selfie && <span className="pill pill-rejected">⚑ dup selfie</span>}
               </div>
               <div className="text-sm text-faint font-mono truncate mt-0.5">
@@ -168,7 +189,7 @@ export default function VotersTab({ code, password, settings, electionId, title,
 
             {usesCodes && (
               <div className="flex items-center gap-3 flex-wrap">
-                <span className="code-chip">
+                <span className="code-chip" style={v.has_voted ? { opacity: .55, textDecoration: 'line-through' } : undefined}>
                   {v.voter_code || <span className="text-faint text-sm tracking-normal">not issued</span>}
                 </span>
                 <div className="action-group">
@@ -186,8 +207,8 @@ export default function VotersTab({ code, password, settings, electionId, title,
                       </a>
                     </>
                   )}
-                  <button className="icon-btn" title="Regenerate code" onClick={() => regen(v.id)}><RefreshCw size={16} /></button>
-                  <button className="icon-btn" title="Set custom code" onClick={() => override(v.id)}><Pencil size={16} /></button>
+                  <button className="icon-btn" title="Regenerate code" onClick={() => regen(v.id, v)}><RefreshCw size={16} /></button>
+                  <button className="icon-btn" title="Set custom code" onClick={() => override(v.id, v)}><Pencil size={16} /></button>
                   <button className="icon-btn icon-btn-danger" title="Delete voter" onClick={() => del(v)}><Trash2 size={16} /></button>
                 </div>
               </div>
@@ -284,9 +305,22 @@ function parsePastedRows(text) {
 }
 
 // WhatsApp / email link helpers — same template behaviour as ResponsesTab
+function normalizePhone(raw) {
+  let p = String(raw || '').replace(/[^0-9]/g, '')
+  if (!p) return ''
+  // already international (starts with country code 94) and long enough
+  if (p.startsWith('94') && p.length >= 11) return p
+  // local format starting with 0 → drop 0, prepend Sri Lanka code 94
+  if (p.startsWith('0')) return '94' + p.slice(1)
+  // bare 9-digit local number (e.g. 760912161) → prepend 94
+  if (p.length === 9) return '94' + p
+  // 10-digit without leading 0 but looks local → prepend 94
+  if (p.length === 10 && !p.startsWith('94')) return '94' + p
+  return p
+}
+
 function waLink(v, code, title, template) {
-  const phone = String(v.raw_data?.phone || v.raw_data?.phone_number || v.raw_data?.whatsapp || '')
-    .replace(/[^0-9]/g, '')
+  const phone = normalizePhone(v.raw_data?.phone || v.raw_data?.phone_number || v.raw_data?.whatsapp)
   const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${code}`
   const msg = (template || 'Hello {name}, your one-time code for {election}: *{code}*. Vote here: {link}')
     .replaceAll('{name}', v.name || '')

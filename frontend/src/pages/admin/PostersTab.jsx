@@ -375,7 +375,7 @@ function PositionPoster({ position, candidates, title, page, pages, dataKey, nic
           <div style={{ fontSize: 'calc(var(--u)*6.5)', fontWeight: 900, color: VIOLET, textTransform: 'uppercase', lineHeight: 1, marginTop: 4 }}>{position.title}</div>
           <div style={{ width: 60, height: 3, background: '#C8102E', margin: '8px auto 0' }} />
           <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 'calc(var(--u)*1.9)', color: '#9b9b8b', marginTop: 6 }}>
-            {position.max_winners > 1 ? `Pick ${position.max_winners}` : 'Pick one'}
+            {position.max_winners > 1 ? `Vote 1 · top ${position.max_winners} win` : 'Vote for 1'}
             {pages > 1 && <span> · sheet {page} of {pages}</span>}
           </div>
         </div>

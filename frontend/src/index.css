@@ -197,6 +197,80 @@ body {
 
   @keyframes countPulse { 0% { opacity:.4 } 100% { opacity:1 } }
   .count-anim { animation: countPulse .5s ease; }
+
+  /* ===== Voting page motion (sleek & modern) ===== */
+  @keyframes vbRise {
+    0%   { opacity: 0; transform: translateY(18px) scale(.985); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes vbFade {
+    0% { opacity: 0; } 100% { opacity: 1; }
+  }
+  @keyframes vbPop {
+    0%   { transform: scale(0); opacity: 0; }
+    60%  { transform: scale(1.25); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes vbSheen {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  @keyframes vbRingIn {
+    0%   { transform: scale(.4); opacity: 0; }
+    100% { transform: scale(1);  opacity: 1; }
+  }
+  @keyframes vbCheckIn {
+    0%   { transform: scale(0) rotate(-20deg); opacity: 0; }
+    70%  { transform: scale(1.2) rotate(4deg); }
+    100% { transform: scale(1) rotate(0); opacity: 1; }
+  }
+
+  /* card entrance, staggered via --i */
+  .vb-rise {
+    opacity: 0;
+    animation: vbRise .55s cubic-bezier(.22,.61,.36,1) forwards;
+    animation-delay: calc(var(--i, 0) * 80ms);
+  }
+  .vb-fade { animation: vbFade .5s ease forwards; }
+
+  /* gradient title accent */
+  .vb-gradient-text {
+    background: linear-gradient(92deg, var(--violet), var(--violet-2) 55%, #9b7bf0);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .vb-accent-bar {
+    height: 4px; width: 56px; border-radius: 4px;
+    background: linear-gradient(90deg, var(--violet), #9b7bf0);
+  }
+
+  /* glassy card */
+  .vb-glass {
+    background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.78));
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.6);
+    box-shadow: 0 10px 30px -16px rgba(40,20,90,.28), 0 1px 0 rgba(255,255,255,.7) inset;
+  }
+
+  /* candidate option */
+  .vb-option {
+    transition: transform .18s cubic-bezier(.22,.61,.36,1), box-shadow .18s ease, border-color .18s ease, background .18s ease;
+    will-change: transform;
+  }
+  .vb-option:hover { transform: translateY(-2px); box-shadow: 0 8px 22px -12px rgba(40,20,90,.35); }
+  .vb-option:active { transform: translateY(0) scale(.99); }
+  .vb-option-selected {
+    box-shadow: 0 0 0 1px var(--violet), 0 10px 26px -12px rgba(91,52,196,.5);
+  }
+  .vb-check { animation: vbPop .32s cubic-bezier(.34,1.56,.64,1); }
+
+  .vb-submit-sheen {
+    background-image: linear-gradient(110deg, var(--violet) 0%, var(--violet-2) 40%, #9b7bf0 50%, var(--violet-2) 60%, var(--violet) 100%);
+    background-size: 200% 100%;
+    animation: vbSheen 3.5s linear infinite;
+  }
+  .vb-ring { animation: vbRingIn .5s cubic-bezier(.34,1.56,.64,1); }
+  .vb-bigcheck { animation: vbCheckIn .6s cubic-bezier(.34,1.56,.64,1) .1s both; }
 }
 
 @media (prefers-reduced-motion: reduce) {

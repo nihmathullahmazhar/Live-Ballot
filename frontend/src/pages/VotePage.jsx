@@ -1,10 +1,61 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import Layout from '../components/Layout'
-import InkX from '../components/InkX'
-import { Eyebrow, Rule, Spinner, Stamp } from '../components/ui'
+import { Spinner } from '../components/ui'
 import { useToast } from '../components/Toast'
 import { getElectionPublic, castVote, imageUrl } from '../lib/api'
+import { Check } from 'lucide-react'
+
+// One vote per position (DB enforces uniqueness). For positions that elect more
+// than one winner, the voter still casts a SINGLE vote and the top-N candidates win.
+function seatLabel(maxWinners) {
+  const n = Math.max(1, maxWinners || 1)
+  return n > 1 ? `Vote 1 · top ${n} win` : 'Vote for 1'
+}
+
+// Tiny self-contained confetti — no dependency. Fires a burst from the given x/y.
+function fireConfetti() {
+  if (typeof window === 'undefined') return
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const canvas = document.createElement('canvas')
+  canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:9999'
+  canvas.width = window.innerWidth; canvas.height = window.innerHeight
+  document.body.appendChild(canvas)
+  const ctx = canvas.getContext('2d')
+  const colors = ['#5B34C4', '#6E45DE', '#9b7bf0', '#16915A', '#E8C766', '#C8102E', '#ffffff']
+  const N = 160
+  const parts = Array.from({ length: N }, () => ({
+    x: canvas.width / 2 + (Math.random() - 0.5) * 120,
+    y: canvas.height * 0.32,
+    vx: (Math.random() - 0.5) * 14,
+    vy: Math.random() * -16 - 4,
+    g: 0.35 + Math.random() * 0.2,
+    size: 5 + Math.random() * 7,
+    rot: Math.random() * Math.PI,
+    vr: (Math.random() - 0.5) * 0.3,
+    color: colors[(Math.random() * colors.length) | 0],
+    shape: Math.random() > 0.5 ? 'rect' : 'circle',
+    life: 0,
+  }))
+  let raf
+  const start = performance.now()
+  function frame(now) {
+    const t = now - start
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    parts.forEach((p) => {
+      p.vy += p.g; p.x += p.vx; p.y += p.vy; p.vx *= 0.99; p.rot += p.vr; p.life = t
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot)
+      ctx.globalAlpha = Math.max(0, 1 - t / 2600)
+      ctx.fillStyle = p.color
+      if (p.shape === 'rect') ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6)
+      else { ctx.beginPath(); ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2); ctx.fill() }
+      ctx.restore()
+    })
+    if (t < 2600) raf = requestAnimationFrame(frame)
+    else { cancelAnimationFrame(raf); canvas.remove() }
+  }
+  raf = requestAnimationFrame(frame)
+}
 
 export default function VotePage() {
   const { code } = useParams()
@@ -12,7 +63,7 @@ export default function VotePage() {
   const [election, setElection] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [choices, setChoices] = useState({}) // position_id -> candidate_id
+  const [choices, setChoices] = useState({}) // position_id -> candidate_id (single)
   const [identity, setIdentity] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
@@ -47,16 +98,18 @@ export default function VotePage() {
     try {
       await castVote(code, identity.trim(), votes)
       setDone(true)
+      fireConfetti()
       toast('Vote recorded', 'success')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (e) { toast(e.message, 'error') }
     finally { setBusy(false) }
   }
 
-  if (loading) return <Layout code={code} back><div className="panel p-8"><Spinner label="Loading ballot…" /></div></Layout>
+  if (loading) return <Layout code={code} back><div className="card p-8"><Spinner label="Loading ballot…" /></div></Layout>
   if (error) return (
     <Layout code={code} back>
-      <div className="panel p-8 text-center">
-        <p className="text-ballot font-display font-700 text-xl uppercase">{error}</p>
+      <div className="card p-8 text-center vb-fade">
+        <p className="text-xl font-bold" style={{ color: 'var(--red)' }}>{error}</p>
         <Link to="/" className="btn mt-5 inline-block">Back to start</Link>
       </div>
     </Layout>
@@ -64,12 +117,15 @@ export default function VotePage() {
 
   if (done) return (
     <Layout code={code} back>
-      <div className="panel p-10 text-center max-w-xl mx-auto">
-        <div className="text-verify flex justify-center"><InkX size={64} /></div>
-        <h1 className="font-display font-900 text-3xl uppercase mt-3">Ballot cast</h1>
-        <p className="text-ink/70 mt-2">Your mark has been counted{isCode ? ' and your code is now used' : ''}.</p>
+      <div className="card vb-glass p-10 text-center max-w-xl mx-auto vb-rise" style={{ '--i': 0 }}>
+        <div className="mx-auto h-20 w-20 rounded-full grid place-items-center vb-ring"
+          style={{ background: 'var(--green-bg)', color: 'var(--green)' }}>
+          <span className="vb-bigcheck inline-flex"><Check size={44} strokeWidth={3} /></span>
+        </div>
+        <h1 className="text-3xl font-extrabold mt-5 vb-gradient-text">Ballot cast</h1>
+        <p className="text-muted mt-2">Your vote has been counted{isCode ? ' and your code is now used' : ''}.</p>
         {election.vote_message && (
-          <div className="mt-5 panel bg-paper2 p-4 text-ink/90 whitespace-pre-wrap text-left">
+          <div className="mt-5 rounded-xl p-4 text-left whitespace-pre-wrap" style={{ background: 'var(--surface-2)', border: '1px solid var(--line)' }}>
             {election.vote_message}
           </div>
         )}
@@ -81,25 +137,28 @@ export default function VotePage() {
     </Layout>
   )
 
+  const totalPicked = Object.values(choices).filter(Boolean).length
+
   return (
     <Layout code={code} back>
       {/* Masthead */}
-      <div className="panel p-6">
-        <Eyebrow>Official ballot · {election.code}</Eyebrow>
-        <h1 className="font-display font-900 text-4xl uppercase mt-2">{election.title}</h1>
-        {election.description && <p className="text-ink/75 mt-2">{election.description}</p>}
+      <div className="card vb-glass p-6 vb-rise" style={{ '--i': 0 }}>
+        <div className="text-xs font-mono uppercase tracking-widest text-muted">Official ballot · {election.code}</div>
+        <h1 className="text-3xl sm:text-4xl font-extrabold mt-2 vb-gradient-text">{election.title}</h1>
+        <div className="vb-accent-bar mt-3" />
+        {election.description && <p className="text-muted mt-3">{election.description}</p>}
         <div className="mt-3 flex flex-wrap gap-2 items-center text-sm">
           <PhaseBadge phase={phase} />
           <span className="text-faint">·</span>
-          <Link to={`/e/${code}/form`} className="underline underline-offset-4 hover:text-violet">
+          <Link to={`/e/${code}/form`} className="underline underline-offset-4" style={{ color: 'var(--violet)' }}>
             {election.enable_self_nomination ? 'Register / stand as candidate' : 'Register'}
           </Link>
         </div>
       </div>
 
       {!canVote && (
-        <div className="panel p-5 mt-5 border-violet">
-          <p className="font-display font-700 uppercase">
+        <div className="card p-5 mt-5 vb-rise" style={{ '--i': 1, borderColor: 'var(--violet)' }}>
+          <p className="font-bold uppercase">
             {phase === 'closed' ? 'Voting is closed.'
               : phase === 'paused' ? 'Voting is paused by the organisers.'
               : phase === 'nominations' ? 'Nominations are open — voting hasn’t started.'
@@ -116,17 +175,17 @@ export default function VotePage() {
 
       {canVote && (
         <>
-          {(election.positions || []).map((p, i) => (
-            <div key={p.id} className="panel p-6 mt-5">
-              <div className="flex items-baseline justify-between">
-                <h2 className="font-display font-800 text-2xl uppercase">{p.title}</h2>
-                <span className="eyebrow">Seat {i + 1} · mark one</span>
+          {(election.positions || []).map((p, idx) => (
+            <div key={p.id} className="card vb-glass p-6 mt-5 vb-rise" style={{ '--i': idx + 1 }}>
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <h2 className="text-2xl font-extrabold uppercase">{p.title}</h2>
+                <span className="pill pill-candidate">{seatLabel(p.max_winners)}</span>
               </div>
-              <Rule />
-              {(p.candidates || []).length === 0 && (
-                <p className="text-faint font-mono text-sm">No candidates yet for this seat.</p>
-              )}
-              <div className="grid sm:grid-cols-2 gap-3">
+              <div className="vb-accent-bar mt-2" style={{ width: 40, opacity: .7 }} />
+              <div className="mt-4 grid sm:grid-cols-2 gap-3">
+                {(p.candidates || []).length === 0 && (
+                  <p className="text-faint text-sm">No candidates yet for this position.</p>
+                )}
                 {(p.candidates || []).map((c) => (
                   <VoteCandidate key={c.id} c={c}
                     selected={choices[p.id] === c.id}
@@ -137,9 +196,9 @@ export default function VotePage() {
           ))}
 
           {/* Identity + submit */}
-          <div className="panel p-6 mt-5">
-            <Eyebrow>Confirm your identity</Eyebrow>
-            <label className="block font-display font-700 uppercase mt-2 mb-1">
+          <div className="card vb-glass p-6 mt-5 vb-rise" style={{ '--i': (election.positions?.length || 0) + 1 }}>
+            <div className="text-xs font-mono uppercase tracking-widest text-muted">Confirm your identity</div>
+            <label className="block font-bold uppercase mt-2 mb-2">
               {isCode ? 'Your voting code' : 'Your admission number'}
             </label>
             <div className="flex flex-col sm:flex-row gap-3">
@@ -149,8 +208,9 @@ export default function VotePage() {
                 value={identity}
                 onChange={(e) => setIdentity(isCode ? e.target.value.toUpperCase() : e.target.value)}
               />
-              <button className="btn btn-primary text-lg" disabled={busy} onClick={submit}>
-                {busy ? 'Casting…' : 'Cast my vote'}
+              <button className="btn btn-primary text-lg vb-submit-sheen" disabled={busy} onClick={submit}
+                style={{ border: 'none', color: '#fff' }}>
+                {busy ? 'Casting…' : `Cast my vote${totalPicked ? ` (${totalPicked})` : ''}`}
               </button>
             </div>
             {isCode && <p className="text-xs text-faint mt-2">Your code works once. After voting it can’t be reused.</p>}
@@ -164,16 +224,16 @@ export default function VotePage() {
 
 function PhaseBadge({ phase }) {
   const map = {
-    open: ['voted', 'Voting open'],
-    voting: ['voted', 'Voting open'],
-    nominations: ['pending', 'Nominations'],
-    pre_voting: ['pending', 'Opening soon'],
-    closed: ['sealed', 'Closed'],
-    paused: ['rejected', 'Paused'],
-    scheduled: ['pending', 'Scheduled'],
+    open: ['pill-approved', 'Voting open'],
+    voting: ['pill-approved', 'Voting open'],
+    nominations: ['pill-pending', 'Nominations'],
+    pre_voting: ['pill-pending', 'Opening soon'],
+    closed: ['pill-rejected', 'Closed'],
+    paused: ['pill-rejected', 'Paused'],
+    scheduled: ['pill-pending', 'Scheduled'],
   }
-  const [kind, label] = map[phase] || ['pending', phase || '—']
-  return <Stamp kind={kind}>{label}</Stamp>
+  const [cls, label] = map[phase] || ['pill-pending', phase || '—']
+  return <span className={`pill ${cls}`}>{label}</span>
 }
 
 function VoteCandidate({ c, selected, onPick }) {
@@ -181,20 +241,30 @@ function VoteCandidate({ c, selected, onPick }) {
   useEffect(() => { if (c.photo_path) imageUrl('candidate-photos', c.photo_path).then(setPhoto) }, [c.photo_path])
   return (
     <button type="button" onClick={onPick}
-      className={`text-left border-2 p-4 flex gap-3 items-start transition ${selected ? 'border-violet bg-white shadow-paper' : 'border-rule bg-white/50 hover:bg-white'}`}>
-      <span className={`h-9 w-9 shrink-0 border-2 border-rule grid place-items-center bg-white ${selected ? 'text-ballot' : 'text-transparent'}`}>
-        <InkX size={26} />
+      className={`vb-option text-left rounded-xl p-3 flex gap-3 items-center w-full ${selected ? 'vb-option-selected' : ''}`}
+      style={{
+        border: selected ? '2px solid var(--violet)' : '1px solid var(--line)',
+        background: selected ? 'var(--violet-bg)' : 'var(--surface)',
+      }}>
+      <span className="h-7 w-7 shrink-0 rounded-md grid place-items-center"
+        style={{
+          border: selected ? '2px solid var(--violet)' : '1.5px solid var(--line-2)',
+          background: selected ? 'var(--violet)' : 'var(--surface)',
+          color: '#fff',
+          transition: 'background .18s ease, border-color .18s ease',
+        }}>
+        {selected && <span className="vb-check inline-flex"><Check size={18} strokeWidth={3} /></span>}
       </span>
       {c.photo_path && (
-        <span className="h-16 w-16 shrink-0 border-2 border-rule bg-white overflow-hidden">
+        <span className="h-16 w-16 shrink-0 rounded-lg overflow-hidden" style={{ border: '1px solid var(--line-2)', background: 'var(--surface-2)' }}>
           {photo
             ? <img src={photo} alt="" className="h-full w-full object-cover" />
             : <span className="block h-full w-full" />}
         </span>
       )}
       <span className="min-w-0">
-        <span className="font-display font-700 text-lg leading-tight block">{c.name}</span>
-        {c.bio && <span className="text-sm text-ink/70 block">{c.bio}</span>}
+        <span className="font-bold text-lg leading-tight block">{c.name}</span>
+        {c.bio && <span className="text-sm text-muted block">{c.bio}</span>}
         {c.manifesto && <span className="text-xs text-faint italic block mt-1 line-clamp-3">{c.manifesto}</span>}
       </span>
     </button>
