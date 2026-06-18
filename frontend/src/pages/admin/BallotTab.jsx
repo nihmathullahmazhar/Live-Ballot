@@ -1,15 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useToast } from '../../components/Toast'
 import { Rule, Spinner } from '../../components/ui'
 import {
   adminGetBallot, adminAddPosition, adminDeletePosition,
   adminAddCandidate, adminDeleteCandidate,
   adminApproveCandidate, adminRejectCandidate,
-  adminUpdatePosition, adminReorderPositions,
+  adminUpdatePosition, adminReorderPositions, adminReorderCandidates,
+  adminSetCandidatePhoto, uploadPhoto,
   subscribeElection, imageUrl,
 } from '../../lib/api'
 import { Plus, Trash2, Check, X, Download, RefreshCw, ImageIcon,
-  ArrowUp, ArrowDown, Pencil } from 'lucide-react'
+  ArrowUp, ArrowDown, ArrowUpDown, Pencil, ListOrdered, Camera } from 'lucide-react'
 import { downloadCSV } from '../../lib/csv'
 
 export default function BallotTab({ code, password, electionId }) {
@@ -23,6 +24,28 @@ export default function BallotTab({ code, password, electionId }) {
   const [editingPos, setEditingPos] = useState(null)
   const [editTitle, setEditTitle] = useState('')
   const [editSeats, setEditSeats] = useState(1)
+  const [reorderPos, setReorderPos] = useState(null) // position id currently in candidate-reorder mode
+
+  async function moveCandidate(position, idx, delta) {
+    const cands = [...(position.candidates || [])]
+    const tgt = idx + delta
+    if (tgt < 0 || tgt >= cands.length) return
+    ;[cands[idx], cands[tgt]] = [cands[tgt], cands[idx]]
+    // optimistic update
+    setPositions((prev) => prev.map((p) => p.id === position.id ? { ...p, candidates: cands } : p))
+    try {
+      await adminReorderCandidates(code, password, position.id, cands.map((c) => c.id))
+    } catch (e) { toast(e.message, 'error'); load() }
+  }
+
+  async function setPhoto(candidateId, file) {
+    if (!file) return
+    try {
+      const up = await uploadPhoto('candidate-photos', code, file)
+      await adminSetCandidatePhoto(code, password, candidateId, up.path)
+      toast('Photo updated', 'success'); load()
+    } catch (e) { toast(e.message, 'error') }
+  }
 
   async function savePos(id) {
     try {
@@ -172,15 +195,22 @@ export default function BallotTab({ code, password, electionId }) {
               </div>
               {!isEditing && (
                 <div className="flex gap-1 shrink-0">
-                  <button className="btn px-2 py-1" title="Move up" disabled={idx === 0}
-                    onClick={() => moveBy(idx, -1)}><ArrowUp size={14} /></button>
-                  <button className="btn px-2 py-1" title="Move down" disabled={idx === positions.length - 1}
-                    onClick={() => moveBy(idx, +1)}><ArrowDown size={14} /></button>
-                  <button className="btn px-2 py-1" title="Edit"
+                  {(p.candidates || []).length > 1 && (
+                    <button className={`icon-btn ${reorderPos === p.id ? 'icon-btn-violet' : ''}`}
+                      title={reorderPos === p.id ? 'Done reordering' : 'Reorder candidates'}
+                      onClick={() => setReorderPos(reorderPos === p.id ? null : p.id)}>
+                      {reorderPos === p.id ? <Check size={15} /> : <ArrowUpDown size={15} />}
+                    </button>
+                  )}
+                  <button className="icon-btn" title="Move position up" disabled={idx === 0}
+                    onClick={() => moveBy(idx, -1)}><ArrowUp size={15} /></button>
+                  <button className="icon-btn" title="Move position down" disabled={idx === positions.length - 1}
+                    onClick={() => moveBy(idx, +1)}><ArrowDown size={15} /></button>
+                  <button className="icon-btn" title="Edit"
                     onClick={() => { setEditingPos(p.id); setEditTitle(p.title); setEditSeats(p.max_winners) }}>
-                    <Pencil size={14} />
+                    <Pencil size={15} />
                   </button>
-                  <button className="btn px-2 py-1 text-ballot" title="Delete position" onClick={() => delPosition(p.id)}>
+                  <button className="icon-btn icon-btn-danger" title="Delete position" onClick={() => delPosition(p.id)}>
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -193,8 +223,12 @@ export default function BallotTab({ code, password, electionId }) {
               <p className="text-sm text-faint">No candidates yet.</p>
             ) : (
               <ul className="space-y-2">
-                {p.candidates.map((c) => (
-                  <CandidateRow key={c.id} c={c} onApprove={approve} onReject={reject} onDelete={delCandidate} />
+                {p.candidates.map((c, ci) => (
+                  <CandidateRow key={c.id} c={c} onApprove={approve} onReject={reject} onDelete={delCandidate}
+                    onSetPhoto={setPhoto}
+                    reordering={reorderPos === p.id}
+                    canUp={ci > 0} canDown={ci < p.candidates.length - 1}
+                    onUp={() => moveCandidate(p, ci, -1)} onDown={() => moveCandidate(p, ci, +1)} />
                 ))}
               </ul>
             )}
@@ -216,46 +250,60 @@ export default function BallotTab({ code, password, electionId }) {
   )
 }
 
-function CandidateRow({ c, onApprove, onReject, onDelete }) {
+function CandidateRow({ c, onApprove, onReject, onDelete, onSetPhoto, reordering, canUp, canDown, onUp, onDown }) {
   const [url, setUrl] = useState(null)
+  const fileRef = useRef(null)
   useEffect(() => { if (c.photo_path) imageUrl('candidate-photos', c.photo_path).then(setUrl) }, [c.photo_path])
   return (
-    <li className="flex items-center justify-between gap-2 border-2 border-rule bg-white px-3 py-2">
+    <li className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 border" style={{ borderColor: 'var(--line)' }}>
       <div className="flex items-center gap-3 min-w-0">
-        {c.photo_path ? (
-          <div className="h-12 w-12 border-2 border-rule overflow-hidden shrink-0">
-            {url
-              ? <img src={url} alt="" className="h-full w-full object-cover" />
-              : <div className="h-full w-full grid place-items-center text-faint"><ImageIcon size={16} /></div>}
+        {reordering && (
+          <div className="flex flex-col gap-0.5 shrink-0">
+            <button className="icon-btn !h-6 !w-6" disabled={!canUp} title="Move up" onClick={onUp}><ArrowUp size={13} /></button>
+            <button className="icon-btn !h-6 !w-6" disabled={!canDown} title="Move down" onClick={onDown}><ArrowDown size={13} /></button>
           </div>
-        ) : c.source === 'self_nominated' ? (
-          <div className="h-12 w-12 border-2 border-dashed border-rule grid place-items-center text-faint shrink-0" title="No photo uploaded">
-            <ImageIcon size={16} />
-          </div>
-        ) : null}
+        )}
+        {/* photo with hover-to-change */}
+        <div className="relative h-12 w-12 shrink-0 group">
+          {c.photo_path && url ? (
+            <div className="h-12 w-12 rounded-md overflow-hidden border" style={{ borderColor: 'var(--line-2)' }}>
+              <img src={url} alt="" className="h-full w-full object-cover" />
+            </div>
+          ) : (
+            <div className="h-12 w-12 rounded-md border border-dashed grid place-items-center text-faint" style={{ borderColor: 'var(--line-2)' }}>
+              <ImageIcon size={16} />
+            </div>
+          )}
+          {onSetPhoto && !reordering && (
+            <button onClick={() => fileRef.current?.click()} title="Change photo"
+              className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-violet text-white grid place-items-center shadow-paper">
+              <Camera size={12} />
+            </button>
+          )}
+          <input ref={fileRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => { onSetPhoto?.(c.id, e.target.files?.[0]); e.target.value = '' }} />
+        </div>
         <div className="min-w-0">
-          <div className="font-600 truncate">{c.name}</div>
+          <div className="font-semibold truncate">{c.name}</div>
           {c.bio && <div className="text-faint text-sm truncate">{c.bio}</div>}
-          <div className="mt-0.5 flex flex-wrap items-center gap-1">
-            <span className="text-[11px] font-mono uppercase border border-rule px-1">{c.status}</span>
-            {c.source === 'self_nominated' && (
-              <span className="text-[11px] font-mono uppercase border border-violet text-violet px-1">nominee</span>
-            )}
-            {c.source === 'self_nominated' && !c.photo_path && (
-              <span className="text-[11px] font-mono text-ballot">no photo</span>
-            )}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className={`pill ${c.status === 'approved' ? 'pill-approved' : c.status === 'rejected' ? 'pill-rejected' : 'pill-pending'}`}>{c.status}</span>
+            {c.source === 'self_nominated' && <span className="pill pill-candidate">nominee</span>}
+            {c.source === 'self_nominated' && !c.photo_path && <span className="pill pill-rejected">no photo</span>}
           </div>
         </div>
       </div>
-      <div className="flex gap-1 shrink-0">
-        {c.status === 'pending' && (
-          <>
-            <button className="btn px-2 py-1 text-green-700" title="Approve" onClick={() => onApprove(c.id)}><Check size={14} /></button>
-            <button className="btn px-2 py-1 text-ballot" title="Reject" onClick={() => onReject(c.id)}><X size={14} /></button>
-          </>
-        )}
-        <button className="btn px-2 py-1" title="Delete" onClick={() => onDelete(c.id)}><Trash2 size={14} /></button>
-      </div>
+      {!reordering && (
+        <div className="action-group shrink-0">
+          {c.status === 'pending' && (
+            <>
+              <button className="icon-btn icon-btn-green" title="Approve" onClick={() => onApprove(c.id)}><Check size={15} /></button>
+              <button className="icon-btn icon-btn-danger" title="Reject" onClick={() => onReject(c.id)}><X size={15} /></button>
+            </>
+          )}
+          <button className="icon-btn icon-btn-danger" title="Delete" onClick={() => onDelete(c.id)}><Trash2 size={15} /></button>
+        </div>
+      )}
     </li>
   )
 }

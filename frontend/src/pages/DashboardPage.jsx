@@ -238,45 +238,6 @@ function DetailModal({ code, onClose, nav }) {
               <Row k="Results" v={d.results_published ? 'Published' : d.results_mode} />
             </div>
 
-            <div>
-              <h3 className="font-display font-800 uppercase text-sm mb-2">Positions &amp; standing</h3>
-              {(!d.positions || d.positions.length === 0) ? (
-                <p className="text-sm text-faint">No positions yet — add them in the Ballot tab.</p>
-              ) : (
-                <div className="space-y-3">
-                  {d.positions.map((p, i) => {
-                    const anyVotes = (p.candidates || []).some((c) => c.votes > 0)
-                    return (
-                      <div key={i} className="border-2 border-rule bg-white p-3">
-                        <div className="flex items-baseline justify-between">
-                          <span className="font-700">{p.title}</span>
-                          <span className="text-xs font-mono text-faint">{p.max_winners} seat{p.max_winners > 1 ? 's' : ''}</span>
-                        </div>
-                        {(p.candidates || []).length === 0 ? (
-                          <p className="text-xs text-faint mt-1">No candidates.</p>
-                        ) : (
-                          <ul className="mt-2 space-y-1">
-                            {p.candidates.map((c, ci) => {
-                              const leading = anyVotes && ci < p.max_winners
-                              return (
-                                <li key={ci} className="flex items-center justify-between text-sm">
-                                  <span className="flex items-center gap-1">
-                                    {leading && <span className="text-violet"><InkX size={13} /></span>}
-                                    <span className={leading ? 'font-700' : ''}>{c.name}</span>
-                                  </span>
-                                  <span className="font-mono text-faint">{c.votes}</span>
-                                </li>
-                              )
-                            })}
-                          </ul>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
             <Rule />
             <div className="flex flex-wrap gap-2">
               <button className="btn btn-primary" onClick={() => nav(`/e/${code}/admin`)}>

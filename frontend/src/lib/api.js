@@ -216,11 +216,38 @@ export async function uploadPhoto(bucket, code, file) {
   return { path, hash }
 }
 
+const _signedCache = new Map() // `${bucket}/${path}` -> { url, exp }
 export async function signedUrl(bucket, path, seconds = 120) {
   if (!path) return null
+  const key = `${bucket}/${path}`
+  const hit = _signedCache.get(key)
+  if (hit && hit.exp > Date.now() + 30_000) return hit.url // reuse if >30s left
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, seconds)
   if (error) return null
-  return data?.signedUrl || null
+  const url = data?.signedUrl || null
+  if (url) _signedCache.set(key, { url, exp: Date.now() + seconds * 1000 })
+  return url
+}
+
+// Download a storage object via the SDK and return a base64 data URL.
+// Uses supabase.storage.download() which fetches through the REST API with the
+// apikey header — this avoids the browser image-CORS problem that blanks <img>
+// exports (a plain <img> displays fine, but fetch()/canvas on it can be blocked).
+const _dataUrlCache = new Map()
+export async function downloadAsDataUrl(bucket, path) {
+  if (!path) return null
+  const key = `${bucket}/${path}`
+  if (_dataUrlCache.has(key)) return _dataUrlCache.get(key)
+  const { data, error } = await supabase.storage.from(bucket).download(path)
+  if (error || !data) return null
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onloadend = () => resolve(r.result)
+    r.onerror = () => reject(new Error('read failed'))
+    r.readAsDataURL(data)
+  })
+  if (dataUrl) _dataUrlCache.set(key, dataUrl)
+  return dataUrl
 }
 
 async function sha256(file) {
@@ -269,6 +296,12 @@ export const adminLogSession = (code, password, actorName) =>
 export const adminDeleteVoter = (code, password, voterId) =>
   rpc('admin_delete_voter', { p_code: code, p_password: password, p_voter_id: voterId })
 
+export const adminReorderCandidates = (code, password, positionId, orderedIds) =>
+  rpc('admin_reorder_candidates', { p_code: code, p_password: password, p_position_id: positionId, p_ordered_ids: orderedIds })
+
+export const adminSetCandidatePhoto = (code, password, candidateId, photoPath) =>
+  rpc('admin_set_candidate_photo', { p_code: code, p_password: password, p_candidate_id: candidateId, p_photo_path: photoPath })
+
 // Subscribe to realtime changes for a given election table.
 // onChange runs on any insert/update/delete. Returns an unsubscribe fn.
 export function subscribeElection(table, electionId, onChange) {
@@ -283,19 +316,19 @@ export function subscribeElection(table, electionId, onChange) {
 }
 
 // Resolve a path in a storage bucket to a viewable URL.
-// Tries public URL first (works if the bucket is set Public in Supabase Storage).
-// Falls back to a 1-hour signed URL if not.
+// candidate-photos is PUBLIC (shown on the ballot) → fast CDN public URLs.
+// voter-photos stays PRIVATE (selfies) → signed URLs.
+// NOTE: image resize transforms are a paid Supabase add-on; on the free tier we
+// must serve originals, so no transform option here.
+const PRIVATE_BUCKETS = new Set(['voter-photos'])
 export async function imageUrl(bucket, path) {
   if (!path) return null
-  // try public URL
+  if (PRIVATE_BUCKETS.has(bucket)) {
+    return signedUrl(bucket, path, 3600)
+  }
   try {
     const { data } = supabase.storage.from(bucket).getPublicUrl(path)
-    if (data?.publicUrl) {
-      // verify it actually loads (private buckets return 400 on the URL)
-      const ok = await fetch(data.publicUrl, { method: 'HEAD' }).then((r) => r.ok).catch(() => false)
-      if (ok) return data.publicUrl
-    }
+    if (data?.publicUrl) return data.publicUrl
   } catch (_) {}
-  // fall back to signed URL
   return signedUrl(bucket, path, 3600)
 }
