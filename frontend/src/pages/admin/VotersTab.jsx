@@ -3,9 +3,9 @@ import { Eyebrow, Spinner } from '../../components/ui'
 import { useToast } from '../../components/Toast'
 import {
   adminGetVoters, adminRegenerateCode, adminSetVoterCode, adminImportVoters,
-  adminBulkImportVoters, adminDeleteVoter, subscribeElection,
+  adminBulkImportVoters, adminDeleteVoter, subscribeElection, adminSetCodeSent,
 } from '../../lib/api'
-import { Copy, Check, RefreshCw, Pencil, Download, Upload, ClipboardPaste, MessageCircle, Mail, Trash2 } from 'lucide-react'
+import { Copy, Check, RefreshCw, Pencil, Download, Upload, ClipboardPaste, MessageCircle, Mail, Trash2, Send } from 'lucide-react'
 
 export default function VotersTab({ code, password, settings, electionId, title, whatsappTemplate }) {
   const toast = useToast()
@@ -33,29 +33,44 @@ export default function VotersTab({ code, password, settings, electionId, title,
   const [bulkBusy, setBulkBusy] = useState(false)
 
   // guided WhatsApp send-all: opens each voter's chat one at a time
-  const [sendAll, setSendAll] = useState({ active: false, queue: [], idx: 0 })
+  const [sendAll, setSendAll] = useState({ active: false, queue: [], idx: 0, sentCount: 0 })
+  const [showSendSetup, setShowSendSetup] = useState(false)
+  const [sendSkipSent, setSendSkipSent] = useState(true)
+  const [sendBatch, setSendBatch] = useState('all') // 'all' | '10' | '25' | '50'
 
-  function startSendAll() {
-    const queue = voters.filter((v) =>
-      v.voter_code &&
-      (v.raw_data?.phone || v.raw_data?.phone_number || v.raw_data?.whatsapp))
-    if (queue.length === 0) { toast('No voters with a phone number and code', 'error'); return }
-    setSendAll({ active: true, queue, idx: 0 })
+  // mark/unmark a voter's code as sent (optimistic local update + DB persist)
+  async function markSent(v, sent) {
+    setVoters((vs) => vs.map((x) => x.id === v.id ? { ...x, code_sent_at: sent ? new Date().toISOString() : null } : x))
+    try { await adminSetCodeSent(code, password, v.id, sent) }
+    catch (e) { toast(e.message, 'error'); load() }
+  }
+
+  // build the send queue from the CURRENTLY FILTERED list — so the organiser picks
+  // the "section" however they like (filter/search/sort), then sends just that group.
+  function beginSend(sourceList) {
+    let queue = sourceList.filter((v) =>
+      v.voter_code && (v.raw_data?.phone || v.raw_data?.phone_number || v.raw_data?.whatsapp))
+    if (sendSkipSent) queue = queue.filter((v) => !v.code_sent_at)
+    if (sendBatch !== 'all') queue = queue.slice(0, parseInt(sendBatch, 10))
+    if (queue.length === 0) { toast('No matching voters with a phone number and code', 'error'); return }
+    setShowSendSetup(false)
+    setSendAll({ active: true, queue, idx: 0, sentCount: 0 })
   }
   function sendCurrent() {
     const v = sendAll.queue[sendAll.idx]
-    if (v) window.open(waLink(v, code, title, whatsappTemplate), '_blank')
-    advanceSend()
+    if (v) { window.open(waLink(v, code, title, whatsappTemplate), '_blank'); markSent(v, true) }
+    advanceSend(true)
   }
-  function skipSend() { advanceSend() }
-  function advanceSend() {
+  function skipSend() { advanceSend(false) }
+  function advanceSend(counted) {
     setSendAll((s) => {
+      const sentCount = s.sentCount + (counted ? 1 : 0)
       const next = s.idx + 1
-      if (next >= s.queue.length) { toast('Reached the end of the list', 'success'); return { active: false, queue: [], idx: 0 } }
-      return { ...s, idx: next }
+      if (next >= s.queue.length) { toast(`Section done — ${sentCount} sent`, 'success'); return { active: false, queue: [], idx: 0, sentCount: 0 } }
+      return { ...s, idx: next, sentCount }
     })
   }
-  function cancelSendAll() { setSendAll({ active: false, queue: [], idx: 0 }) }
+  function cancelSendAll() { setSendAll({ active: false, queue: [], idx: 0, sentCount: 0 }) }
 
   async function bulkPaste() {
     const rows = parsePastedRows(bulkText)
@@ -72,6 +87,8 @@ export default function VotersTab({ code, password, settings, electionId, title,
   const filtered = voters.filter((v) => {
     if (filter === 'voted' && !v.has_voted) return false
     if (filter === 'not_voted' && v.has_voted) return false
+    if (filter === 'sent' && !v.code_sent_at) return false
+    if (filter === 'not_sent' && v.code_sent_at) return false
     if (filter === 'pending' && v.status !== 'pending') return false
     if (filter === 'flagged' && !v.duplicate_selfie) return false
     if (!q.trim()) return true
@@ -141,13 +158,15 @@ export default function VotersTab({ code, password, settings, electionId, title,
             <option value="all">All</option>
             <option value="voted">Voted</option>
             <option value="not_voted">Not voted</option>
+            <option value="sent">Code sent</option>
+            <option value="not_sent">Code not sent</option>
             <option value="pending">Pending review</option>
             <option value="flagged">Flagged selfie</option>
           </select>
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-primary text-sm" onClick={startSendAll} title="Open each voter's WhatsApp with their code pre-filled, one at a time">
-            <MessageCircle size={14} className="inline -mt-1 mr-1" /> Send all on WhatsApp
+          <button className="btn btn-primary text-sm" onClick={() => setShowSendSetup((v) => !v)} title="Send codes on WhatsApp, in sections you choose">
+            <MessageCircle size={14} className="inline -mt-1 mr-1" /> Send on WhatsApp
           </button>
           <button className="btn text-sm" onClick={() => setShowBulk((v) => !v)}>
             <ClipboardPaste size={14} className="inline -mt-1 mr-1" /> Paste list
@@ -162,15 +181,54 @@ export default function VotersTab({ code, password, settings, electionId, title,
         </div>
       </div>
 
+      {showSendSetup && !sendAll.active && (() => {
+        const eligible = filtered.filter((v) => v.voter_code && (v.raw_data?.phone || v.raw_data?.phone_number || v.raw_data?.whatsapp))
+        const afterSkip = sendSkipSent ? eligible.filter((v) => !v.code_sent_at) : eligible
+        const willSend = sendBatch === 'all' ? afterSkip.length : Math.min(afterSkip.length, parseInt(sendBatch, 10))
+        return (
+          <div className="card p-5 vb-fade" style={{ borderColor: 'var(--violet)' }}>
+            <div className="font-bold uppercase text-sm" style={{ color: 'var(--violet)' }}>Send codes in a section</div>
+            <p className="text-sm text-muted mt-1">
+              This sends to whoever is <b>shown in the list right now</b> ({filtered.length} shown).
+              Use the search & filters above to pick your section — e.g. filter by grade, “Code not sent”, or search a batch — then send just that group.
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={sendSkipSent} onChange={(e) => setSendSkipSent(e.target.checked)} />
+                Skip people already marked “sent”
+              </label>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted">How many:</span>
+                <select className="input w-auto py-1" value={sendBatch} onChange={(e) => setSendBatch(e.target.value)}>
+                  <option value="all">All shown</option>
+                  <option value="10">First 10</option>
+                  <option value="25">First 25</option>
+                  <option value="50">First 50</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3 flex-wrap">
+              <button className="btn btn-primary" onClick={() => beginSend(filtered)} disabled={willSend === 0}>
+                Start sending {willSend} {willSend === 1 ? 'code' : 'codes'} →
+              </button>
+              <button className="btn btn-ghost" onClick={() => setShowSendSetup(false)}>Cancel</button>
+              {eligible.length === 0 && <span className="text-xs" style={{ color: 'var(--red)' }}>No one in this view has both a code and a phone number.</span>}
+            </div>
+          </div>
+        )
+      })()}
+
       {sendAll.active && (
         <div className="card p-5 vb-fade" style={{ borderColor: 'var(--violet)' }}>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <div className="font-bold uppercase text-sm" style={{ color: 'var(--violet)' }}>
-                Guided WhatsApp send · {sendAll.idx + 1} of {sendAll.queue.length}
+                Sending section · {sendAll.idx + 1} of {sendAll.queue.length} · {sendAll.sentCount} sent
               </div>
               <p className="text-sm text-muted mt-1">
-                Sending to: <b>{sendAll.queue[sendAll.idx]?.name || sendAll.queue[sendAll.idx]?.voter_code}</b>
+                Now: <b>{sendAll.queue[sendAll.idx]?.name || sendAll.queue[sendAll.idx]?.voter_code}</b>
                 {' '}({sendAll.queue[sendAll.idx]?.raw_data?.phone || sendAll.queue[sendAll.idx]?.raw_data?.whatsapp || 'no number'})
               </p>
             </div>
@@ -182,8 +240,11 @@ export default function VotersTab({ code, password, settings, electionId, title,
               <button className="btn btn-ghost" onClick={cancelSendAll}>Stop</button>
             </div>
           </div>
-          <p className="text-xs text-faint mt-3">
-            Tip: WhatsApp opens with the message pre-filled — just tap send, come back, and hit "Open WhatsApp & next" for the following voter. Voters with no phone number are skipped automatically.
+          <div className="vb-turnout-track mt-3">
+            <div className="vb-turnout-fill" style={{ width: `${Math.round((sendAll.idx / sendAll.queue.length) * 100)}%` }} />
+          </div>
+          <p className="text-xs text-faint mt-2">
+            WhatsApp opens with the message pre-filled — tap send, come back, and hit “Open WhatsApp & next”. Each one is auto-marked as sent.
           </p>
         </div>
       )}
@@ -214,6 +275,8 @@ export default function VotersTab({ code, password, settings, electionId, title,
         <span style={{ color: 'var(--red)' }}>{voters.filter((v) => v.has_voted).length} voted</span>
         <span className="mx-1">/</span>
         <span style={{ color: 'var(--green)' }}>{voters.filter((v) => !v.has_voted).length} not voted</span>
+        <span className="mx-2">·</span>
+        <span style={{ color: 'var(--violet)' }}>{voters.filter((v) => v.code_sent_at).length} code sent</span>
       </p>
 
       <div className="space-y-3">
@@ -233,6 +296,7 @@ export default function VotersTab({ code, password, settings, electionId, title,
                 {v.has_voted
                   ? <span className="pill pill-rejected" style={{ fontWeight: 800 }}>✓ VOTED</span>
                   : <span className="pill pill-approved">not voted</span>}
+                {v.code_sent_at && <span className="pill pill-converted" title={`Code sent ${new Date(v.code_sent_at).toLocaleString()}`}>✓ sent</span>}
                 <StatusPill status={v.status} />
                 {v.duplicate_selfie && <span className="pill pill-rejected">⚑ dup selfie</span>}
               </div>
@@ -252,13 +316,21 @@ export default function VotersTab({ code, password, settings, electionId, title,
                       <button className="icon-btn" title="Copy code" onClick={() => copy(v.voter_code, v.id)}>
                         {copiedId === v.id ? <Check size={16} /> : <Copy size={16} />}
                       </button>
-                      <a className="icon-btn icon-btn-green" title="Send on WhatsApp"
-                         href={waLink(v, code, title, whatsappTemplate)} target="_blank" rel="noreferrer">
+                      <a className="icon-btn icon-btn-green" title="Send on WhatsApp (marks as sent)"
+                         href={waLink(v, code, title, whatsappTemplate)} target="_blank" rel="noreferrer"
+                         onClick={() => markSent(v, true)}>
                         <MessageCircle size={16} />
                       </a>
                       <a className="icon-btn" title="Email code" href={mailLink(v, code, title)}>
                         <Mail size={16} />
                       </a>
+                      <button
+                        className={`icon-btn ${v.code_sent_at ? 'icon-btn-violet' : ''}`}
+                        title={v.code_sent_at ? 'Marked as sent — click to unmark' : 'Mark code as sent'}
+                        onClick={() => markSent(v, !v.code_sent_at)}
+                        style={v.code_sent_at ? { background: 'var(--violet-bg)', borderColor: '#d9ccf6', color: 'var(--violet)' } : undefined}>
+                        {v.code_sent_at ? <Check size={16} /> : <Send size={16} />}
+                      </button>
                     </>
                   )}
                   <button className="icon-btn" title="Regenerate code" onClick={() => regen(v.id, v)}><RefreshCw size={16} /></button>

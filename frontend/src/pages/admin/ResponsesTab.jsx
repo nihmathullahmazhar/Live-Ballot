@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Eyebrow, Spinner } from '../../components/ui'
+import { Spinner } from '../../components/ui'
 import { useToast } from '../../components/Toast'
 import {
   adminGetResponses, adminDeleteResponse, adminGenerateCodes, adminUpdateResponse,
@@ -18,6 +18,7 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
+  const [sort, setSort] = useState('newest')
   const [sel, setSel] = useState({})
   const [issued, setIssued] = useState([])
   const [busy, setBusy] = useState(false)
@@ -35,7 +36,7 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
         getFormFields(code).catch(() => null),
         adminGetBallot(code, password).catch(() => []),
       ])
-      setRows(resp)
+      setRows(annotateDuplicates(resp))
       setFields((ff?.fields || []).filter((f) => f.section === 'voter'))
       setPositions(bal || [])
     } catch (e) { toast(e.message, 'error') }
@@ -54,12 +55,32 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
 
   const list = rows.filter((r) => {
     if (filter === 'duplicates') {
-      if (!r.dup_email && !r.dup_admission) return false
+      if (!r.flagged) return false
+    } else if (filter === 'candidacy') {
+      if (!r.wants_candidacy) return false
+    } else if (filter === 'voted') {
+      if (!r.has_voted) return false
+    } else if (filter === 'not_issued') {
+      if (r.voter_code) return false
     } else if (filter !== 'all' && r.status !== filter) return false
     if (!q.trim()) return true
     const hay = `${r.name || ''} ${r.email || ''} ${r.admission_number || ''} ${r.voter_code || ''}`.toLowerCase()
     return hay.includes(q.toLowerCase())
+  }).sort((a, b) => {
+    if (sort === 'name') return (a.name || '').localeCompare(b.name || '')
+    if (sort === 'oldest') return new Date(a.created_at || 0) - new Date(b.created_at || 0)
+    return new Date(b.created_at || 0) - new Date(a.created_at || 0) // newest (default)
   })
+
+  // headline counts for the summary strip
+  const counts = {
+    total: rows.length,
+    pending: rows.filter((r) => r.status === 'pending').length,
+    issued: rows.filter((r) => r.voter_code).length,
+    candidacy: rows.filter((r) => r.wants_candidacy).length,
+    voted: rows.filter((r) => r.has_voted).length,
+    duplicates: rows.filter((r) => r.flagged).length,
+  }
   const selectedIds = Object.keys(sel).filter((id) => sel[id])
 
   function selectAllPending() {
@@ -105,11 +126,30 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
     downloadCSV(`${code}-codes`, issued)
   }
 
-  if (loading && rows.length === 0) return <div className="panel p-6"><Spinner label="Loading responses…" /></div>
+  if (loading && rows.length === 0) return <div className="card p-6"><Spinner label="Loading responses…" /></div>
 
   return (
     <div className="space-y-4">
-      <div className="panel p-4 flex flex-wrap gap-3 items-center justify-between">
+      {/* clickable summary strip */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        {[
+          ['all', 'Total', counts.total, 'violet'],
+          ['pending', 'Pending', counts.pending, 'amber'],
+          ['converted', 'Code issued', counts.issued, 'green'],
+          ['candidacy', 'Want to run', counts.candidacy, 'violet'],
+          ['voted', 'Voted', counts.voted, 'green'],
+          ['duplicates', 'Flagged', counts.duplicates, 'red'],
+        ].map(([key, label, value, tone]) => (
+          <button key={key} onClick={() => setFilter(key)}
+            className="stat-card text-left"
+            style={filter === key ? { borderColor: `var(--${tone})`, boxShadow: `0 0 0 1px var(--${tone})` } : undefined}>
+            <div className="stat-num" style={{ color: `var(--${tone})`, fontSize: '1.6rem' }}>{value}</div>
+            <div className="stat-label">{label}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="card p-4 flex flex-wrap gap-3 items-center justify-between">
         <div className="flex gap-2 items-center flex-wrap">
           <div className="relative">
             <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-faint" />
@@ -117,10 +157,20 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
               value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <select className="input w-auto" value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="all">All</option>
+            <option value="all">All statuses</option>
             <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
             <option value="converted">Code issued</option>
-            <option value="duplicates">Duplicates only</option>
+            <option value="not_issued">No code yet</option>
+            <option value="rejected">Rejected</option>
+            <option value="candidacy">Wants candidacy</option>
+            <option value="voted">Has voted</option>
+            <option value="duplicates">Flagged (possible cheating)</option>
+          </select>
+          <select className="input w-auto" value={sort} onChange={(e) => setSort(e.target.value)}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="name">Name A–Z</option>
           </select>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -146,15 +196,15 @@ export default function ResponsesTab({ code, password, electionId, whatsappTempl
             className={`btn text-sm ${view === v ? 'btn-primary' : ''}`}>{l}</button>
         ))}
         <span className="ml-auto eyebrow">
-          {list.length} of {rows.length} responses
-          {electionId && <span className="ml-2 text-verify font-mono">● live</span>}
+          {list.length} of {rows.length} shown
+          {electionId && <span className="ml-2" style={{ color: 'var(--green)' }}>● live</span>}
         </span>
       </div>
 
       {issued.length > 0 && (
-        <div className="panel p-5 border-verify">
+        <div className="card p-5" style={{ borderColor: 'var(--violet)' }}>
           <div className="flex items-center justify-between mb-2">
-            <Eyebrow className="text-verify">Codes just issued — share via WhatsApp / email / copy</Eyebrow>
+            <div className="text-xs font-mono uppercase tracking-widest" style={{ color: 'var(--violet)' }}>Codes just issued — share via WhatsApp / email / copy</div>
             <button className="btn text-sm" onClick={exportIssued}>
               <Download size={14} className="inline -mt-1 mr-1" /> CSV
             </button>
@@ -246,6 +296,12 @@ function ResponseCard({ r, fields, code, password, positions, sel, setSel, setEd
               {r.has_voted && <span className="pill pill-approved">voted</span>}
               {r.dup_email && <span className="pill pill-rejected">dup email</span>}
               {r.dup_admission && <span className="pill pill-rejected">dup ID</span>}
+              {r.dup_phone && <span className="pill pill-rejected">dup phone</span>}
+              {r.similar_to?.length > 0 && (
+                <span className="pill pill-rejected" title={`Similar name to: ${r.similar_to.join(', ')}`}>
+                  ⚠ similar name
+                </span>
+              )}
               <StatusPill status={r.status} />
             </div>
             <div className="text-xs text-faint font-mono flex flex-wrap items-center gap-x-2 mt-0.5">
@@ -253,6 +309,11 @@ function ResponseCard({ r, fields, code, password, positions, sel, setSel, setEd
               {r.email && <span>· {r.email}</span>}
               {r.admission_number && <span>· #{r.admission_number}</span>}
             </div>
+            {r.similar_to?.length > 0 && (
+              <div className="text-xs mt-1" style={{ color: 'var(--red)' }}>
+                ⚠ Name resembles: {[...new Set(r.similar_to)].join(', ')} — check for a duplicate registration.
+              </div>
+            )}
           </div>
         </div>
         <div className="action-group items-start shrink-0 flex-nowrap">
@@ -393,6 +454,69 @@ function looksLikeImagePath(v) {
   if (typeof v !== 'string') return false
   return /\.(jpe?g|png|gif|webp|heic|bmp)$/i.test(v) && (v.includes('/') || v.length > 20)
 }
+// ---- Integrity / duplicate detection -------------------------------------
+// Flags responses that look like the same person registering twice:
+//  • exact duplicate email / admission number / phone
+//  • near-duplicate NAME (fuzzy) — catches altered spellings like
+//    "Mohamed Munthasir" vs "Mohammed Munthasir"
+function normName(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/[^a-z0-9\s]/g, ' ')                       // drop punctuation
+    .replace(/\s+/g, ' ').trim()
+}
+function phoneDigits(r) {
+  const raw = r.raw_data?.phone || r.raw_data?.phone_number || r.raw_data?.whatsapp || r.phone || ''
+  return String(raw).replace(/[^0-9]/g, '').replace(/^0/, '').replace(/^94/, '')
+}
+// Levenshtein distance (small strings, fine for a few hundred rows)
+function lev(a, b) {
+  if (a === b) return 0
+  const m = a.length, n = b.length
+  if (!m) return n; if (!n) return m
+  let prev = Array.from({ length: n + 1 }, (_, i) => i)
+  for (let i = 1; i <= m; i++) {
+    const cur = [i]
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    }
+    prev = cur
+  }
+  return prev[n]
+}
+function nameSimilar(a, b) {
+  const x = normName(a), y = normName(b)
+  if (!x || !y || x.length < 3 || y.length < 3) return false
+  if (x === y) return true
+  // token-set: same words in any order (handles reordered/extra middle names)
+  const xs = new Set(x.split(' ')), ys = new Set(y.split(' '))
+  const inter = [...xs].filter((t) => ys.has(t)).length
+  const tokenScore = inter / Math.max(xs.size, ys.size)
+  if (tokenScore >= 0.6 && inter >= 1) return true
+  // edit distance: within ~15% of length (catches 1–2 char spelling tweaks)
+  const d = lev(x, y)
+  return d <= Math.max(1, Math.round(Math.max(x.length, y.length) * 0.15))
+}
+function annotateDuplicates(rows) {
+  const out = rows.map((r) => ({ ...r, dup_phone: false, similar_to: [] }))
+  // exact phone duplicates
+  const byPhone = {}
+  out.forEach((r) => { const p = phoneDigits(r); if (p) (byPhone[p] = byPhone[p] || []).push(r) })
+  Object.values(byPhone).forEach((g) => { if (g.length > 1) g.forEach((r) => { r.dup_phone = true }) })
+  // fuzzy name clusters
+  for (let i = 0; i < out.length; i++) {
+    for (let j = i + 1; j < out.length; j++) {
+      if (nameSimilar(out[i].name, out[j].name)) {
+        out[i].similar_to.push(out[j].name || '—')
+        out[j].similar_to.push(out[i].name || '—')
+      }
+    }
+  }
+  out.forEach((r) => { r.flagged = r.dup_email || r.dup_admission || r.dup_phone || r.similar_to.length > 0 })
+  return out
+}
+
 function valOf(r, key) {
   let v = r.answers?.[key]
   if (v === undefined || v === null || v === '') {
@@ -439,38 +563,69 @@ function mailLink(r, code, title) {
 }
 
 function Summary({ rows, fields }) {
-  if (!fields || fields.length === 0)
-    return <div className="panel p-6 text-faint text-sm">Build your form (Form tab) to see a question-by-question summary here.</div>
   const total = rows.length
+  const answeredRate = (f) => rows.filter((r) => valOf(r, f.field_key) !== '').length
+
   return (
     <div className="space-y-4">
-      <div className="panel p-4">
-        <span className="font-display font-900 text-2xl">{total}</span>
-        <span className="text-faint ml-2">response{total === 1 ? '' : 's'}</span>
+      {/* headline metrics */}
+      <div className="card vb-glass p-6">
+        <div className="text-xs font-mono uppercase tracking-widest text-muted">Form summary</div>
+        <div className="flex items-end gap-3 mt-1">
+          <span className="text-4xl font-extrabold vb-gradient-text">{total}</span>
+          <span className="text-muted mb-1">response{total === 1 ? '' : 's'} collected</span>
+        </div>
+        <div className="vb-accent-bar mt-3" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+          <Metric label="Want to run" value={rows.filter((r) => r.wants_candidacy).length} tone="violet" />
+          <Metric label="Code issued" value={rows.filter((r) => r.voter_code).length} tone="green" />
+          <Metric label="Pending" value={rows.filter((r) => r.status === 'pending').length} tone="amber" />
+          <Metric label="Duplicates" value={rows.filter((r) => r.dup_email || r.dup_admission).length} tone="red" />
+        </div>
       </div>
-      {fields.map((f) => {
+
+      {(!fields || fields.length === 0) ? (
+        <div className="card p-6 text-muted text-sm">Build your form (Form tab) to see a question-by-question breakdown here.</div>
+      ) : fields.map((f) => {
         const isChoice = ['dropdown', 'radio', 'checkbox'].includes(f.field_type)
-        const answered = rows.filter((r) => valOf(r, f.field_key) !== '')
+        const answered = answeredRate(f)
+        const pct = total ? Math.round((answered / total) * 100) : 0
         return (
-          <div key={f.field_key} className="panel p-4">
-            <div className="font-display font-700">{f.label || f.field_key}</div>
-            <div className="text-xs text-faint font-mono mb-2">{f.field_type} · {answered.length}/{total} answered</div>
-            {isChoice ? (
-              <ChoiceBars rows={rows} field={f} options={Array.isArray(f.options) ? f.options : []} />
-            ) : (
-              <ul className="text-sm space-y-0.5 max-h-52 overflow-auto">
-                {answered.length === 0 && <li className="text-faint">No answers yet.</li>}
-                {answered.slice(0, 100).map((r, i) => (
-                  <li key={i} className="border-b border-dashed border-rule/40 py-0.5 break-words">{valOf(r, f.field_key)}</li>
-                ))}
-              </ul>
-            )}
+          <div key={f.field_key} className="card p-5">
+            <div className="flex items-baseline justify-between gap-3 flex-wrap">
+              <div className="font-semibold">{f.label || f.field_key}</div>
+              <div className="text-xs text-faint font-mono">{f.field_type} · {answered}/{total} answered ({pct}%)</div>
+            </div>
+            <div className="mt-3">
+              {isChoice ? (
+                <ChoiceBars rows={rows} field={f} options={Array.isArray(f.options) ? f.options : []} />
+              ) : (
+                <ul className="text-sm space-y-1 max-h-52 overflow-auto pr-1">
+                  {answered === 0 && <li className="text-faint">No answers yet.</li>}
+                  {rows.filter((r) => valOf(r, f.field_key) !== '').slice(0, 100).map((r, i) => (
+                    <li key={i} className="py-1 break-words" style={{ borderBottom: '1px dashed var(--line)' }}>
+                      <span className="text-faint font-mono text-xs mr-2">{r.name || '—'}:</span>{valOf(r, f.field_key)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         )
       })}
     </div>
   )
 }
+
+function Metric({ label, value, tone }) {
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--surface-2)', border: '1px solid var(--line)' }}>
+      <div className="text-2xl font-extrabold" style={{ color: `var(--${tone})` }}>{value}</div>
+      <div className="text-xs text-muted mt-0.5">{label}</div>
+    </div>
+  )
+}
+
 function ChoiceBars({ rows, field, options }) {
   const counts = {}; options.forEach((o) => { counts[o] = 0 }); let blank = 0
   rows.forEach((r) => {
@@ -484,18 +639,24 @@ function ChoiceBars({ rows, field, options }) {
       else counts[raw] = (counts[raw] || 0) + 1
     }
   })
-  const max = Math.max(1, ...Object.values(counts), blank)
+  const totalAns = Math.max(1, ...Object.values(counts), blank)
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1])
   return (
-    <div className="space-y-1">
-      {Object.entries(counts).map(([opt, c]) => (
-        <div key={opt} className="flex items-center gap-2 text-sm">
-          <span className="min-w-[7rem] sm:min-w-[10rem] shrink-0 truncate">{opt}</span>
-          <span className="flex-1 bg-paper2 h-4 border border-rule/30">
-            <span className="block h-full bg-violet" style={{ width: `${(c / max) * 100}%` }} />
-          </span>
-          <span className="font-mono text-xs w-8 text-right">{c}</span>
-        </div>
-      ))}
+    <div className="space-y-2">
+      {sorted.map(([opt, c]) => {
+        const pct = Math.round((c / totalAns) * 100)
+        return (
+          <div key={opt}>
+            <div className="flex justify-between text-sm mb-1">
+              <span className="truncate pr-2">{opt}</span>
+              <span className="font-mono text-xs text-muted shrink-0">{c} · {pct}%</span>
+            </div>
+            <div className="vb-res-track" style={{ height: 12 }}>
+              <div className="vb-res-fill vb-res-win" style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        )
+      })}
       {blank > 0 && <div className="text-xs text-faint mt-1">No answer: {blank}</div>}
     </div>
   )

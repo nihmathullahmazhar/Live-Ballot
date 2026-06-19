@@ -9,7 +9,7 @@ import {
   adminFinalizeElection, adminUnfinalizeElection, adminSetResultsMode,
   adminSetPaused, adminSetRegistrationOpen, adminSetPassword, adminSetVoteMessage,
   adminSetMaxNomineePositions, adminSetCodeFormat, adminSetWhatsappTemplate,
-  adminSetWindows, adminGetSyncToken, adminRotateSyncToken,
+  adminSetWindows, adminGetSyncToken, adminRotateSyncToken, adminSetSelfNomination,
 } from '../../lib/api'
 import { supabaseUrl, supabaseAnonKey } from '../../lib/supabase'
 import { Copy } from 'lucide-react'
@@ -22,6 +22,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
   const [mode, setMode] = useState(settings.results_mode || 'hidden')
   const [paused, setPaused] = useState(settings.is_paused)
   const [regOpen, setRegOpen] = useState(settings.registration_open)
+  const [selfNom, setSelfNom] = useState(settings.enable_self_nomination)
   const [hasPw, setHasPw] = useState(!!settings.has_password)
   const [shareInput, setShareInput] = useState('')
   const [voteMsg, setVoteMsg] = useState(settings.vote_message || '')
@@ -61,10 +62,46 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
 
   return (
     <div className="space-y-5">
-      {/* Sharing & access */}
-      <div className="panel p-6">
+      {/* Status banner — current state + the controls you reach for most */}
+      <div className="card p-6" style={{ borderColor: paused ? 'var(--red)' : finalized ? 'var(--green)' : 'var(--violet)' }}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-mono uppercase tracking-widest text-muted">Election status</div>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {paused
+                ? <span className="pill pill-rejected" style={{ fontWeight: 800 }}>Paused</span>
+                : finalized
+                  ? <span className="pill pill-approved" style={{ fontWeight: 800 }}>Live · voting can open</span>
+                  : <span className="pill pill-pending" style={{ fontWeight: 800 }}>Setup · not finalized</span>}
+              <span className="pill pill-candidate">Results: {mode === 'admin_only' ? 'admin only' : mode}</span>
+              {published && <span className="pill pill-approved">Results published</span>}
+              {regOpen && <span className="pill pill-candidate">Registration open</span>}
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {!finalized ? (
+              <button className="btn btn-primary" disabled={busy === 'fin'}
+                onClick={() => run('fin', () => adminFinalizeElection(code, password),
+                  'Finalize this election? Voting will be allowed (within your time window).',
+                  () => { setFinalized(true); onSettingsChange?.({ is_finalized: true }); toast('Election finalized', 'success') })}>
+                Finalize &amp; allow voting
+              </button>
+            ) : (
+              <button className={`btn ${paused ? 'btn-primary' : 'btn-danger'}`} disabled={busy === 'pause'}
+                onClick={() => run('pause', () => adminSetPaused(code, password, !paused), null,
+                  (r) => { setPaused(r.is_paused); onSettingsChange?.({ is_paused: r.is_paused }); toast(r.is_paused ? 'Voting paused' : 'Voting resumed', 'success') })}>
+                {paused ? 'Resume voting' : 'Pause voting'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <SectionLabel>Sharing &amp; access</SectionLabel>
+
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Sharing &amp; access</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           You manage this election from your dashboard whenever you're logged in — no password.
           A <b>sharing password</b> is optional: set one to let someone <i>without an account</i>
           help manage it. Give them the code <span className="font-mono">{code}</span> + the password,
@@ -112,9 +149,9 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Post-vote message */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Message after voting</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           Shown to each voter right after they cast their vote — a thank-you, when results go live, etc.
           Leave blank for none.
         </p>
@@ -131,9 +168,10 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Election schedule (nominations + voting windows) */}
-      <div className="panel p-6">
+      <SectionLabel>Setup &amp; configuration</SectionLabel>
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Election schedule</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           Optional. If you set a nominations window, self-nominations are accepted only inside it.
           If you set a voting window, voting opens automatically when it starts and closes when it ends.
           Leave any field blank to skip that gate.
@@ -213,9 +251,9 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Voter-code format */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Voter-code format</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           How the one-time codes look. You can change this any time before voting starts;
           codes already issued stay the same.
         </p>
@@ -244,9 +282,9 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Max positions a nominee can stand for */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Self-nomination limit</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           The maximum number of positions one person can stand for in this election.
         </p>
         <div className="mt-3 flex items-end gap-3">
@@ -266,9 +304,9 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* WhatsApp / email message template */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base">WhatsApp message template</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           Used when you tap the WhatsApp button next to a voter in Responses. Placeholders get
           filled in automatically:
           <span className="font-mono text-xs"> {'{name}'}, {'{code}'}, {'{election}'}, {'{link}'}</span>.
@@ -290,9 +328,9 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Google Sheets live sync */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Google Sheets sync</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           Mirror this election into a Google Sheet that updates automatically every few minutes — responses,
           voters, candidates, live vote counts. Free, no third-party service.
         </p>
@@ -318,7 +356,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
               <SyncRow label="Anon key" value={supabaseAnonKey} secret />
             </div>
 
-            <details className="mt-4 rounded-lg p-3 bg-paper2 border border-[var(--line)] p-3">
+            <details className="mt-4 rounded-lg p-3 bg-[var(--surface-2)] border border-[var(--line)] p-3">
               <summary className="font-display font-700 uppercase text-sm cursor-pointer">
                 Setup steps (Google Sheets · 5 min, one-time)
               </summary>
@@ -351,9 +389,10 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Finalization gate */}
-      <div className="panel p-6">
+      <SectionLabel>Voting controls</SectionLabel>
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Finalization (the voting gate)</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           Voting cannot open until you finalize. Finalize only after you’ve issued
           codes and approved candidates. You can re-open if you finalized too early.
         </p>
@@ -377,40 +416,34 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Live run controls */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base">During the run</h3>
         <div className="mt-3 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-paper2 border border-[var(--line)] p-4">
-            <div className="max-w-md">
-              <div className="font-display font-700 uppercase text-sm">Pause voting</div>
-              <div className="text-sm text-ink/70">Temporarily stop votes without closing. Voters see “voting is paused.”</div>
-            </div>
-            <button className={`btn ${paused ? 'btn-primary' : 'btn-danger'}`} disabled={busy === 'pause'}
-              onClick={() => run('pause', () => adminSetPaused(code, password, !paused), null,
-                (r) => { setPaused(r.is_paused); onSettingsChange?.({ is_paused: r.is_paused }); toast(r.is_paused ? 'Voting paused' : 'Voting resumed', 'success') })}>
-              {paused ? 'Resume voting' : 'Pause voting'}
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-paper2 border border-[var(--line)] p-4">
-            <div className="max-w-md">
-              <div className="font-display font-700 uppercase text-sm">Registration form</div>
-              <div className="text-sm text-ink/70">
-                {regOpen ? 'Open — the form accepts new submissions.' : 'Closed — the form is not accepting submissions.'}
-              </div>
-            </div>
-            <button className={`btn ${regOpen ? '' : 'btn-primary'}`} disabled={busy === 'reg'}
-              onClick={() => run('reg', () => adminSetRegistrationOpen(code, password, !regOpen), null,
-                (r) => { setRegOpen(r.registration_open); onSettingsChange?.({ registration_open: r.registration_open }); toast(r.registration_open ? 'Registration opened' : 'Registration closed', 'success') })}>
-              {regOpen ? 'Close registration' : 'Open registration'}
-            </button>
-          </div>
+          <ToggleRow
+            title="Registration form"
+            desc={regOpen ? 'Open — the form accepts new submissions.' : 'Closed — not accepting submissions.'}
+            on={regOpen} tone="green"
+            disabled={busy === 'reg'}
+            onToggle={() => run('reg', () => adminSetRegistrationOpen(code, password, !regOpen), null,
+              (r) => { setRegOpen(r.registration_open); onSettingsChange?.({ registration_open: r.registration_open }); toast(r.registration_open ? 'Registration opened' : 'Registration closed', 'success') })}
+          />
+          <ToggleRow
+            title="Self-nomination"
+            desc={selfNom ? 'On — people can nominate themselves as candidates in the form.' : 'Off — the form stays open but the candidate step is hidden. You add candidates from Responses/Ballot.'}
+            on={selfNom} tone="violet"
+            disabled={busy === 'selfnom'}
+            onToggle={() => run('selfnom', () => adminSetSelfNomination(code, password, !selfNom), null,
+              () => { const v = !selfNom; setSelfNom(v); onSettingsChange?.({ enable_self_nomination: v }); toast(v ? 'Self-nomination on' : 'Self-nomination off', 'success') })}
+          />
+          <p className="text-xs text-faint">Tip: pause/resume voting is in the status banner at the top.</p>
         </div>
       </div>
 
       {/* Results visibility mode */}
-      <div className="panel p-6">
+      <SectionLabel>Results</SectionLabel>
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Results visibility</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           <b>Hidden</b>: nobody sees results until you publish. <b>Live</b>: counts
           are public during voting. <b>Admin only</b>: only this panel sees them.
         </p>
@@ -427,9 +460,9 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Results publish (used by hidden mode) */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Publish results</h3>
-        <p className="text-sm text-ink/70 mt-1">
+        <p className="text-sm text-muted mt-1">
           For <b>hidden</b> mode: release the <Link to={`/e/${code}/results`} className="underline">results page</Link> when ready.
           (Live mode is already public; admin-only never is.)
         </p>
@@ -451,7 +484,8 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Maintenance */}
-      <div className="panel p-6">
+      <SectionLabel>Maintenance &amp; data</SectionLabel>
+      <div className="card p-6">
         <h3 className="font-semibold text-base">Maintenance</h3>
         <div className="mt-3 space-y-3">
           <Row title="Reset all votes"
@@ -476,7 +510,7 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
       </div>
 
       {/* Danger */}
-      <div className="panel p-6">
+      <div className="card p-6">
         <h3 className="font-semibold text-base" style={{color:"var(--red)"}}>Danger zone</h3>
         <Rule />
         <Row title="Delete this election"
@@ -493,12 +527,40 @@ export default function ControlsTab({ code, password, settings, onSettingsChange
   )
 }
 
-function Row({ title, desc, children }) {
+function SectionLabel({ children }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-paper2 border border-[var(--line)] p-4">
+    <div className="flex items-center gap-3 pt-2">
+      <h3 className="text-xs font-mono uppercase tracking-widest text-muted">{children}</h3>
+      <div className="flex-1 h-px" style={{ background: 'var(--line)' }} />
+    </div>
+  )
+}
+
+function Toggle({ on, tone, disabled, onClick }) {
+  return (
+    <button type="button" className="lb-switch" data-on={!!on} data-tone={tone || 'violet'}
+      disabled={disabled} aria-pressed={!!on} onClick={onClick} />
+  )
+}
+
+function ToggleRow({ title, desc, on, tone, disabled, onToggle }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--surface-2)] border border-[var(--line)] p-4">
       <div className="max-w-md">
         <div className="font-display font-700 uppercase text-sm">{title}</div>
-        <div className="text-sm text-ink/70">{desc}</div>
+        <div className="text-sm text-muted">{desc}</div>
+      </div>
+      <Toggle on={on} tone={tone} disabled={disabled} onClick={onToggle} />
+    </div>
+  )
+}
+
+function Row({ title, desc, children }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--surface-2)] border border-[var(--line)] p-4">
+      <div className="max-w-md">
+        <div className="font-display font-700 uppercase text-sm">{title}</div>
+        <div className="text-sm text-muted">{desc}</div>
       </div>
       {children}
     </div>

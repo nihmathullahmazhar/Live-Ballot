@@ -10,6 +10,7 @@ import NominatePage from './pages/NominatePage'
 import RequestAccessPage from './pages/RequestAccessPage'
 import FormPage from './pages/FormPage'
 import AdminPage from './pages/admin/AdminPage'
+import LegalPage from './pages/LegalPage'
 import NotFoundPage from './pages/NotFoundPage'
 
 export default function App() {
@@ -26,6 +27,8 @@ export default function App() {
       <Route path="/e/:code/request" element={<RequestAccessPage />} />
       <Route path="/e/:code/form" element={<FormPage />} />
       <Route path="/e/:code/admin" element={<AdminPage />} />
+      <Route path="/terms" element={<LegalPage kind="terms" />} />
+      <Route path="/privacy" element={<LegalPage kind="privacy" />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )

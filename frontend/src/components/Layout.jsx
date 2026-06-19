@@ -50,7 +50,13 @@ export default function Layout({ children, code, back }) {
 
       <footer className="border-t-2 border-rule bg-paper">
         <div className="mx-auto max-w-5xl px-4 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <span className="eyebrow">Secret ballot · one vote per seat · sealed until close</span>
+          <div>
+            <span className="eyebrow block">Secret ballot · one vote per seat · sealed until close</span>
+            <div className="flex gap-3 mt-2 text-xs">
+              <Link to="/terms" className="underline underline-offset-4 text-faint hover:text-violet">Terms of Use</Link>
+              <Link to="/privacy" className="underline underline-offset-4 text-faint hover:text-violet">Privacy Policy</Link>
+            </div>
+          </div>
           <a
             href="https://nihmathullah.com"
             target="_blank" rel="noreferrer"

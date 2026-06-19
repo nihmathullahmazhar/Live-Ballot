@@ -69,6 +69,11 @@ export const adminRegenerateCode = (code, password, registrationId) =>
     p_code: code, p_password: password, p_registration_id: registrationId,
   })
 
+export const adminSetCodeSent = (code, password, registrationId, sent) =>
+  rpc('admin_set_code_sent', {
+    p_code: code, p_password: password, p_registration_id: registrationId, p_sent: sent,
+  })
+
 export const adminApproveRegistration = (code, password, registrationId) =>
   rpc('admin_approve_registration', {
     p_code: code, p_password: password, p_registration_id: registrationId,
@@ -350,4 +355,3 @@ export async function imageUrl(bucket, path) {
   } catch (_) {}
   return signedUrl(bucket, path, 3600)
 }
-
